@@ -389,29 +389,43 @@ export function createCampaignService(ctx) {
         taken: 0,
         people: 0,
       },
-      recipients: recipients
-        .map((r) => {
+      // Dedup by phone within the same Excel: if the same number appears on
+      // several rows (sometimes with different names — e.g. a household or a
+      // data-entry variation), combine the names into one recipient so the
+      // person is messaged only once. Mirrors what mergeCampaigns does across
+      // batches.
+      recipients: (() => {
+        const byPhone = new Map();
+        for (const r of recipients) {
           const phone = plusPhone(r.phone);
-          if (!phone) return null;
+          if (!phone) continue;
           const names = namesFromRecipient(r);
-          const row = {
-            phone,
-            name: r.name || names.join(" + ") || "",
-            names,
-            code: String(r.code || "").trim(),
-            state: "queued",
-            channel: "none",
-            detail: "Queued for sending",
-            updatedAt: Date.now(),
-            takenAt: null,
-            takenAidId: "",
-            printCount: 0,
-            pickups: [],
-          };
-          ensurePickups(row);
-          return row;
-        })
-        .filter(Boolean),
+          const code = String(r.code || "").trim();
+          const existing = byPhone.get(phone);
+          if (!existing) {
+            byPhone.set(phone, {
+              phone,
+              name: r.name || names.join(" + ") || "",
+              names,
+              code,
+              state: "queued",
+              channel: "none",
+              detail: "Queued for sending",
+              updatedAt: Date.now(),
+              takenAt: null,
+              takenAidId: "",
+              printCount: 0,
+              pickups: [],
+            });
+          } else {
+            existing.names = uniquePersonNames([...existing.names, ...names]);
+            existing.name = existing.names.join(" + ") || existing.name;
+            if (!existing.code && code) existing.code = code;
+          }
+        }
+        for (const row of byPhone.values()) ensurePickups(row);
+        return [...byPhone.values()];
+      })(),
     };
 
     recountStats(newCampaign);
@@ -676,6 +690,11 @@ export function createCampaignService(ctx) {
     return [...byKey.values()];
   }
 
+  // Combine two recipients that share the same phone number (e.g. the same
+  // person appeared in several Excel batches with different names). All
+  // distinct names are kept (case-insensitive dedup) so neither name is lost
+  // and pickup search works by any of them. The send state of the more
+  // "advanced" side wins so an already-sent person is never re-queued.
   function mergeTwoRecipients(base, extra) {
     ensurePickups(base);
     ensurePickups(extra);
