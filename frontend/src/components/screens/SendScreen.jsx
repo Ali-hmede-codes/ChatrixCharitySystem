@@ -668,9 +668,9 @@ export function SendScreen() {
                           </strong>
                           <p className="sms-card-desc">
                             {!smsReady
-                              ? "You cannot send SMS until httpSMS is fully configured: turn it on, paste the API key, and enter a valid +961 or +963 sender number in Settings & SMS."
+                              ? "You cannot send SMS until httpSMS is fully configured: turn it on, paste the API key, and enter a valid +961 (Lebanon) sender number in Settings & SMS."
                               : enableSms
-                              ? `If a WhatsApp message isn't confirmed delivered within ${smsSettings.deliveryWaitMinutes || 10} minutes or the recipient is not on WhatsApp, httpSMS will automatically send via cellular SMS.`
+                              ? `If a WhatsApp message isn't confirmed delivered within ${smsSettings.deliveryWaitMinutes || 10} minutes or the recipient is not on WhatsApp, httpSMS will automatically send via cellular SMS (Lebanon only — Syrian numbers stay WhatsApp-only).`
                               : "No cellular SMS will be sent for this campaign. Beneficiaries without WhatsApp or with delays will be skipped to save SMS credits."}
                           </p>
                         </div>

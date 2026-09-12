@@ -152,6 +152,15 @@ export function createDeliveryTracker(ctx) {
             return;
           }
           const smsReady = Boolean(ctx.services.sms?.ready?.());
+          if (result?.reason === "not_lebanese") {
+            settleItem(
+              batch,
+              item,
+              "undelivered",
+              "Not delivered on WhatsApp · SMS only supports Lebanese (+961) numbers"
+            );
+            return;
+          }
           if (result?.skipped || !smsReady) {
             settleItem(
               batch,

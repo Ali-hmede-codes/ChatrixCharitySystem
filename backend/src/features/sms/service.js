@@ -50,7 +50,11 @@ export function createSmsService(ctx) {
   }
 
   function ready() {
-    return Boolean(settings.enabled && settings.apiKey && settings.from);
+    // SMS is Lebanon-only: the sender must be a +961 number.
+    const fromDigits = toWhatsAppDigits(settings.from);
+    return Boolean(
+      settings.enabled && settings.apiKey && fromDigits && fromDigits.startsWith("961")
+    );
   }
 
   function deliveryWaitMs() {
@@ -106,6 +110,12 @@ export function createSmsService(ctx) {
     if (!settings.enabled) return { ok: false, reason: "disabled", skipped: true };
     if (!settings.apiKey) return { ok: false, reason: "no_api_key", skipped: true };
     if (!settings.from) return { ok: false, reason: "no_from", skipped: true };
+    // SMS fallback is Lebanon-only: Syrian (+963) recipients are skipped so
+    // they never get an SMS (they stay WhatsApp-only).
+    const digits = toWhatsAppDigits(phone);
+    if (!digits || !digits.startsWith("961")) {
+      return { ok: false, reason: "not_lebanese", skipped: true };
+    }
     return sendSmsViaHttpSms({
       url: SMS_SEND_URL,
       apiKey: settings.apiKey,
@@ -126,7 +136,15 @@ export function createSmsService(ctx) {
     if (enabled && !fromDigits) {
       socket.emit(
         "sms:error",
-        "SMS is not configured. Enter a valid sender number in Lebanon (+961) or Syria (+963) format, for example +961 3 154 131."
+        "SMS is not configured. Enter a valid sender number in Lebanon (+961) format, for example +961 3 154 131."
+      );
+      return;
+    }
+    // SMS is Lebanon-only: a Syrian (+963) sender is not allowed.
+    if (enabled && fromDigits && !fromDigits.startsWith("961")) {
+      socket.emit(
+        "sms:error",
+        "SMS only supports Lebanese (+961) numbers. Enter a +961 sender number."
       );
       return;
     }

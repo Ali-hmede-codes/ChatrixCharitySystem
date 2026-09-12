@@ -55,7 +55,11 @@ export function SettingsScreen() {
   const fromPreview = normalizePhone(smsFrom);
   const fromIssue = describePhoneIssue(smsFrom);
   const hasApiKey = Boolean(smsApiKey.trim() || smsSettings.hasApiKey);
-  const hasValidFrom = Boolean(toWhatsAppDigits(smsFrom));
+  // SMS is Lebanon-only: the sender must be a +961 number. A valid Syrian
+  // (+963) number is rejected for SMS (WhatsApp/Excel still accept Syria).
+  const fromDigits = toWhatsAppDigits(smsFrom);
+  const isSyrianFrom = Boolean(fromDigits && fromDigits.startsWith("963"));
+  const hasValidFrom = Boolean(fromDigits && fromDigits.startsWith("961"));
 
   function handleSaveSms() {
     if (smsEnabled) {
@@ -65,9 +69,11 @@ export function SettingsScreen() {
       }
       if (!hasValidFrom) {
         showToast(
-          fromIssue
-            ? `Sender number is not valid: ${fromIssue}. SMS cannot send until this is a +961 or +963 number.`
-            : "Enter a valid sender number in +961 (Lebanon) or +963 (Syria) format. SMS cannot send until this is set.",
+          isSyrianFrom
+            ? "SMS only supports Lebanese (+961) numbers. Enter a +961 sender number."
+            : fromIssue
+              ? `Sender number is not valid: ${fromIssue}. SMS cannot send until this is a +961 number.`
+              : "Enter a valid sender number in +961 (Lebanon) format. SMS cannot send until this is set.",
           "error"
         );
         return;
@@ -329,7 +335,7 @@ export function SettingsScreen() {
                 </>
               ) : (
                 <>
-                  <strong>SMS is not configured.</strong> Campaigns cannot send SMS until you turn this on, paste the API key, and enter a valid +961 or +963 sender number.
+                  <strong>SMS is not configured.</strong> Campaigns cannot send SMS until you turn this on, paste the API key, and enter a valid +961 (Lebanon) sender number.
                 </>
               )}
             </div>
@@ -343,8 +349,8 @@ export function SettingsScreen() {
               <ul className="info-callout-list">
                 <li>Install the free <strong>httpSMS</strong> app on your charity Android phone with an active SIM card.</li>
                 <li>Copy your API key from <strong>httpsms.com/settings</strong>.</li>
-                <li>Enter the API key and phone number (+961 or +963 format) below.</li>
-                <li>When any WhatsApp message remains undelivered for {smsSettings.deliveryWaitMinutes || 10} minutes, Chatrix automatically triggers an SMS to that number.</li>
+                <li>Enter the API key and phone number (+961 Lebanon format) below.</li>
+                <li>When any WhatsApp message remains undelivered for {smsSettings.deliveryWaitMinutes || 10} minutes, Chatrix automatically triggers an SMS to that number (Lebanon only — Syrian numbers stay WhatsApp-only).</li>
               </ul>
             </div>
 
@@ -385,13 +391,13 @@ export function SettingsScreen() {
 
             <div className="form-group">
               <label className="form-label" htmlFor="sms-from-input">
-                Sender Android Phone Number (+961 or +963 format)
+                Sender Android Phone Number (+961 Lebanon format)
               </label>
               <input
                 id="sms-from-input"
                 type="tel"
                 className={`form-input ${smsFrom.trim() && !hasValidFrom ? "is-invalid" : ""}`}
-                placeholder="+961 3 154 131 or +963 9XX XXX XXX"
+                placeholder="+961 3 154 131"
                 value={smsFrom}
                 onChange={(e) => setSmsFrom(e.target.value)}
               />
@@ -400,7 +406,9 @@ export function SettingsScreen() {
               )}
               {smsFrom.trim() && !hasValidFrom && (
                 <span className="form-hint form-hint-error">
-                  {fromIssue}. Use Lebanon (+961) or Syria (+963) only.
+                  {isSyrianFrom
+                    ? "Syrian (+963) numbers are not supported for SMS. Use a Lebanon (+961) sender."
+                    : `${fromIssue}. Use Lebanon (+961) only.`}
                 </span>
               )}
               {!smsFrom.trim() && (
