@@ -47,7 +47,14 @@ if ! command -v pm2 >/dev/null 2>&1; then
   npm install -g pm2
 fi
 
-echo "==> Starting or restarting ${APP_NAME} in PM2"
+echo "==> Stopping leftover Chatrix copies so only one PM2 process owns the site"
+pm2 stop "${APP_NAME}" >/dev/null 2>&1 || true
+if command -v fuser >/dev/null 2>&1; then
+  fuser -k 4173/tcp 4174/tcp 4179/tcp >/dev/null 2>&1 || true
+fi
+sleep 1
+
+echo "==> Starting ${APP_NAME} in PM2"
 if pm2 describe "${APP_NAME}" >/dev/null 2>&1; then
   pm2 restart "${APP_NAME}" --update-env
 else
