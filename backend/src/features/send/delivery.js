@@ -59,7 +59,14 @@ export function createDeliveryTracker(ctx) {
     const fallbacks = ctx.channels.ready("fallback");
     const sms = fallbacks.find((channel) => channel.id === "sms") || fallbacks[0];
     if (!sms) return { ok: false, reason: "not_ready", skipped: true };
-    return sms.send({ phone: item.phone, text: item.text || batch.message });
+    // Final re-check right before the actual SMS send: if WhatsApp delivered
+    // the message while this SMS was sitting in the queue, skip it so we
+    // don't send both a WhatsApp message and an SMS to the same person.
+    return sms.send({
+      phone: item.phone,
+      text: item.text || batch.message,
+      shouldSkip: () => item.settled || item.delivered,
+    });
   }
 
   function deliveryWaitMs() {
@@ -142,6 +149,13 @@ export function createDeliveryTracker(ctx) {
       queueSmsFallback(item, batch, reason)
         .then((result) => {
           if (item.settled) return;
+          if (result?.reason === "delivered_on_whatsapp") {
+            // WhatsApp delivered while the SMS was waiting in the queue — the
+            // receipt handler already settles this as delivered; this is a
+            // defensive fallback in case it hasn't run yet.
+            if (!item.settled) settleItem(batch, item, "delivered", "Delivered on WhatsApp · SMS skipped");
+            return;
+          }
           if (batch.enableSms === false || result?.reason === "campaign_sms_disabled") {
             settleItem(
               batch,

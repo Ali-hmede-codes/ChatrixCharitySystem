@@ -10,7 +10,8 @@ export const smsFeature = {
       kind: "fallback",
       label: "SMS",
       ready: () => sms.ready(),
-      send: ({ phone, text }) => sms.enqueue(() => sms.send({ phone, text })),
+      send: ({ phone, text, shouldSkip }) =>
+        sms.enqueue(() => sms.send({ phone, text }), shouldSkip),
     });
   },
   sockets(ctx) {

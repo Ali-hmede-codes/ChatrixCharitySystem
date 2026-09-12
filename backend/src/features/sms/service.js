@@ -90,7 +90,14 @@ export function createSmsService(ctx) {
     while (queue.length) {
       const job = queue.shift();
       try {
-        job.resolve(await job.task());
+        // Final pre-send check: if the caller passed a shouldSkip callback
+        // (e.g. WhatsApp delivered the message while this SMS was waiting in
+        // the queue), skip the send entirely instead of double-sending.
+        if (job.shouldSkip && job.shouldSkip()) {
+          job.resolve({ ok: false, reason: "delivered_on_whatsapp", skipped: true });
+        } else {
+          job.resolve(await job.task());
+        }
       } catch (error) {
         job.resolve({ ok: false, reason: error.message || "SMS send failed" });
       }
@@ -99,9 +106,9 @@ export function createSmsService(ctx) {
     busy = false;
   }
 
-  function enqueue(task) {
+  function enqueue(task, shouldSkip) {
     return new Promise((resolve) => {
-      queue.push({ task, resolve });
+      queue.push({ task, resolve, shouldSkip });
       pump();
     });
   }
