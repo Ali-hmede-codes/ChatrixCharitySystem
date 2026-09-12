@@ -72,9 +72,12 @@ export const campaignsFeature = {
       });
 
       socket.on("pickup:export", (payload) => {
+        const p = payload || {};
+        const wantStatus =
+          p.status === "pending" || p.status === "all" ? p.status : "taken";
         const result = campaigns.searchPickup({
-          ...(payload || {}),
-          status: "taken",
+          ...p,
+          status: wantStatus,
           limit: 5000,
         });
         socket.emit("pickup:export-data", result);

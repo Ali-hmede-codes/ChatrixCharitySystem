@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import * as XLSXStyle from "xlsx-js-style";
 import { formatPhone, normalizePhone, toWhatsAppDigits } from "./phone.js";
 
 export function cellText(value) {
@@ -269,40 +270,91 @@ export function formatSheetDateTime(ts) {
   return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
-export function downloadCollectedExcel(rows, { campaignDay, campaignName } = {}) {
+export function downloadCollectedExcel(rows, { campaignDay, campaignName, status = "taken" } = {}) {
   const list = Array.isArray(rows) ? rows : [];
-  const sheetRows = list.map((row) => ({
-    "Aid ID": row.takenAidId || "",
-    Name: row.name || row.personName || "",
-    Phone: row.phone || "",
-    "Pickup code": row.code || "",
-    Campaign: row.campaignName || "",
-    "Campaign date": formatSheetDateTime(row.campaignDate).slice(0, 10) || formatCampaignDay(campaignDay),
-    "Collected at": formatSheetDateTime(row.takenAt),
-    "Print count": row.printCount || 0,
-  }));
+  const wantStatus = status === "pending" || status === "all" ? status : "taken";
 
-  const workbook = XLSX.utils.book_new();
-  const sheet = XLSX.utils.json_to_sheet(
-    sheetRows.length
-      ? sheetRows
-      : [{ "Aid ID": "", Name: "", Phone: "", "Pickup code": "", Campaign: "", "Campaign date": "", "Collected at": "", "Print count": "" }]
-  );
-  sheet["!cols"] = [
-    { wch: 14 },
-    { wch: 28 },
-    { wch: 18 },
-    { wch: 14 },
-    { wch: 28 },
-    { wch: 14 },
-    { wch: 18 },
-    { wch: 12 },
+  const columns = [
+    { key: "aidId", header: "Aid ID", width: 14 },
+    { key: "name", header: "Name", width: 28 },
+    { key: "phone", header: "Phone", width: 18 },
+    { key: "code", header: "Pickup code", width: 14 },
+    { key: "campaign", header: "Campaign", width: 28 },
+    { key: "campaignDate", header: "Campaign date", width: 14 },
+    { key: "collectedAt", header: "Collected at", width: 18 },
+    { key: "printCount", header: "Print count", width: 12 },
+    { key: "status", header: "Status", width: 14 },
   ];
-  XLSX.utils.book_append_sheet(workbook, sheet, "Collected");
 
+  const buildRow = (row) => ({
+    aidId: row.takenAidId || "",
+    name: row.name || row.personName || "",
+    phone: row.phone || "",
+    code: row.code || "",
+    campaign: row.campaignName || "",
+    campaignDate:
+      formatSheetDateTime(row.campaignDate).slice(0, 10) || formatCampaignDay(campaignDay),
+    collectedAt: formatSheetDateTime(row.takenAt),
+    printCount: row.printCount || 0,
+    status: row.takenAt ? "Collected" : "Not collected",
+  });
+
+  const sheetRows = list.map(buildRow);
+  const aoa = [
+    columns.map((c) => c.header),
+    ...sheetRows.map((r) => columns.map((c) => r[c.key])),
+  ];
+
+  const sheet = XLSXStyle.utils.aoa_to_sheet(aoa);
+  sheet["!cols"] = columns.map((c) => ({ wch: c.width }));
+
+  const HEADER_STYLE = {
+    fill: { patternType: "solid", fgColor: { rgb: "FF305496" } },
+    font: { color: { rgb: "FFFFFFFF" }, bold: true },
+    alignment: { horizontal: "left", vertical: "center" },
+  };
+  const NOT_COLLECTED_STYLE = {
+    fill: { patternType: "solid", fgColor: { rgb: "FFFFC7CE" } },
+    font: { color: { rgb: "FF9C0006" } },
+  };
+
+  // Header styling.
+  columns.forEach((_, i) => {
+    const addr = XLSXStyle.utils.encode_cell({ r: 0, c: i });
+    if (!sheet[addr]) sheet[addr] = { t: "s", v: "" };
+    sheet[addr].s = HEADER_STYLE;
+  });
+
+  // Highlight not-collected rows in red. Only meaningful for the "all" export,
+  // where collected and not-collected rows are mixed in one sheet.
+  if (wantStatus === "all") {
+    sheetRows.forEach((r, rIdx) => {
+      if (r.collectedAt) return;
+      const rowNumber = rIdx + 1;
+      columns.forEach((_, cIdx) => {
+        const addr = XLSXStyle.utils.encode_cell({ r: rowNumber, c: cIdx });
+        if (!sheet[addr]) sheet[addr] = { t: "s", v: "" };
+        sheet[addr].s = NOT_COLLECTED_STYLE;
+      });
+    });
+  }
+
+  const workbook = XLSXStyle.utils.book_new();
+  const sheetName =
+    wantStatus === "taken" ? "Collected" : wantStatus === "pending" ? "Not collected" : "Aid";
+  XLSXStyle.utils.book_append_sheet(workbook, sheet, String(sheetName).slice(0, 31));
+
+  const prefix =
+    wantStatus === "taken"
+      ? "collected-aid"
+      : wantStatus === "pending"
+        ? "not-collected-aid"
+        : "all-aid";
   const dayPart = campaignDay && campaignDay !== "all" ? campaignDay : "all-dates";
-  const campPart = campaignName ? `-${String(campaignName).replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 40)}` : "";
-  const fileName = `collected-aid-${dayPart}${campPart}.xlsx`;
-  XLSX.writeFile(workbook, fileName);
-  return { fileName, count: list.length };
+  const campPart = campaignName
+    ? `-${String(campaignName).replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 40)}`
+    : "";
+  const fileName = `${prefix}-${dayPart}${campPart}.xlsx`;
+  XLSXStyle.writeFile(workbook, fileName);
+  return { fileName, count: list.length, status: wantStatus };
 }

@@ -4519,6 +4519,145 @@ svg {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
 }
 
+/* Export chooser: centered modal on desktop, bottom sheet on mobile. */
+.export-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 70;
+}
+.export-sheet-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.export-sheet {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -46%) scale(0.96);
+  width: min(560px, 92vw);
+  max-height: 88dvh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 75;
+  padding: 22px 22px 18px;
+}
+.export-sheet.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* The close button is hidden by default (it only shows for the mobile pickup
+   sheet); force it visible inside the export chooser on every screen size. */
+.export-sheet .pickup-sheet-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--border-subtle);
+  background: #fff;
+  color: var(--slate-600);
+  cursor: pointer;
+}
+
+.export-sheet-head {
+  margin-bottom: 6px;
+  padding-right: 40px;
+}
+.export-sheet-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.export-sheet-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--slate-500);
+}
+
+.export-section {
+  margin-top: 16px;
+}
+.export-section-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--slate-500);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+.export-radio-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.export-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.export-radio input {
+  margin-top: 3px;
+  accent-color: #2563eb;
+}
+.export-radio.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.export-radio-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.export-radio-copy strong {
+  font-size: 14px;
+}
+.export-radio-copy small {
+  font-size: 12px;
+  color: var(--slate-500);
+}
+
+.export-date-chips {
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.export-sheet-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.export-sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
 @media (max-width: 1024px) {
   .pickup-desk-layout,
   .printer-settings-grid {
@@ -4604,6 +4743,22 @@ svg {
   .pickup-sheet-backdrop.is-open {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* Mobile: the export chooser becomes a bottom sheet that slides up. */
+  .export-sheet {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    transform: translateY(100%);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.18);
+    max-height: 86dvh;
+  }
+  .export-sheet.is-open {
+    transform: translateY(0);
   }
 }
 

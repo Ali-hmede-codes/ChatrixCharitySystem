@@ -62,6 +62,14 @@ export function PickupScreen() {
   const [status, setStatus] = useState("pending");
   const [selected, setSelected] = useState(null);
 
+  // Export chooser: opens as a centered modal on desktop and a bottom sheet
+  // on mobile. It has its own scope (date + campaign) and a status choice
+  // (collected / not collected / both) so the export is self-contained.
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportStatus, setExportStatus] = useState("taken");
+  const [exportDay, setExportDay] = useState("all");
+  const [exportCampaignId, setExportCampaignId] = useState("");
+
   // On mobile the confirm card is a bottom sheet that should only open when
   // the user taps a name — so we skip the "auto-select first row" behaviour on
   // small screens. On desktop the right pane always shows a person, so we
@@ -147,12 +155,38 @@ export function PickupScreen() {
     [campaignsOnDay]
   );
 
+  const exportCampaignsOnDay = useMemo(() => {
+    if (exportDay === "all") return campaigns;
+    return campaigns.filter((campaign) => campaignDayKey(campaign.createdAt) === exportDay);
+  }, [campaigns, exportDay]);
+
+  const exportScope = useMemo(() => {
+    const pool = exportCampaignId
+      ? exportCampaignsOnDay.filter((c) => c.id === exportCampaignId)
+      : exportCampaignsOnDay;
+    const taken = pool.reduce((s, c) => s + (Number(c.stats?.taken) || 0), 0);
+    const people = pool.reduce(
+      (s, c) => s + (Number(c.stats?.people) || Number(c.totalRecipients) || 0),
+      0
+    );
+    const pending = Math.max(0, people - taken);
+    return { taken, pending, total: taken + pending, hasCampaigns: pool.length > 0 };
+  }, [exportCampaignsOnDay, exportCampaignId]);
+
   useEffect(() => {
     if (!campaignId) return;
     if (!campaignsOnDay.some((campaign) => campaign.id === campaignId)) {
       setCampaignId("");
     }
   }, [campaignsOnDay, campaignId]);
+
+  // Keep the export campaign select valid when its date changes.
+  useEffect(() => {
+    if (!exportOpen || !exportCampaignId) return;
+    if (!exportCampaignsOnDay.some((c) => c.id === exportCampaignId)) {
+      setExportCampaignId("");
+    }
+  }, [exportCampaignsOnDay, exportCampaignId, exportOpen]);
 
   function handleAccept() {
     if (!selected || pickupBusy) return;
@@ -185,13 +219,23 @@ export function PickupScreen() {
     undoPickup(selected.campaignId, selected.phone, selected.personName || selected.name);
   }
 
-  function handleExport() {
+  function openExport() {
+    // Seed the chooser scope from the current screen filters so it reflects
+    // what the user is looking at, then let them adjust inside the dialog.
+    setExportDay(campaignDay);
+    setExportCampaignId(campaignId);
+    setExportStatus("taken");
+    setExportOpen(true);
+  }
+
+  function runExport() {
     exportCollected({
-      query,
-      campaignDay,
-      campaignId,
-      status: "taken",
+      query: "",
+      campaignDay: exportDay,
+      campaignId: exportCampaignId,
+      status: exportStatus,
     });
+    setExportOpen(false);
   }
 
   function emptyCopy() {
@@ -232,11 +276,11 @@ export function PickupScreen() {
           <button
             type="button"
             className="btn-primary"
-            onClick={handleExport}
-            disabled={!socketConnected || (campaignDay === "all" ? totalTaken : filteredTaken) === 0}
+            onClick={openExport}
+            disabled={!socketConnected || campaigns.length === 0}
           >
             <IconSpreadsheet className="w-4 h-4 mr-1.5" />
-            <span>Export collected Excel</span>
+            <span>Export</span>
           </button>
         </div>
       </div>
@@ -538,6 +582,160 @@ export function PickupScreen() {
           </aside>
         </div>
       </div>
+
+      <div
+        className={`export-sheet-backdrop ${exportOpen ? "is-open" : ""}`}
+        onClick={() => setExportOpen(false)}
+        aria-hidden="true"
+      />
+      <aside
+        className={`export-sheet ${exportOpen ? "is-open" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Export pickup list"
+      >
+        <button
+          type="button"
+          className="pickup-sheet-close"
+          onClick={() => setExportOpen(false)}
+          aria-label="Close export"
+        >
+          <IconX className="w-5 h-5" />
+        </button>
+        <div className="export-sheet-head">
+          <h2>Export pickup list</h2>
+          <p>Choose what to include and the campaign scope, then export to Excel.</p>
+        </div>
+
+        <div className="export-section">
+          <span className="export-section-label">What to export</span>
+          <div className="export-radio-list">
+            <label className={`export-radio ${exportStatus === "taken" ? "active" : ""}`}>
+              <input
+                type="radio"
+                name="export-status"
+                value="taken"
+                checked={exportStatus === "taken"}
+                onChange={() => setExportStatus("taken")}
+              />
+              <span className="export-radio-copy">
+                <strong>Only collected</strong>
+                <small>People who already collected aid.</small>
+              </span>
+            </label>
+            <label className={`export-radio ${exportStatus === "pending" ? "active" : ""}`}>
+              <input
+                type="radio"
+                name="export-status"
+                value="pending"
+                checked={exportStatus === "pending"}
+                onChange={() => setExportStatus("pending")}
+              />
+              <span className="export-radio-copy">
+                <strong>Only not collected</strong>
+                <small>People who have not collected yet.</small>
+              </span>
+            </label>
+            <label className={`export-radio ${exportStatus === "all" ? "active" : ""}`}>
+              <input
+                type="radio"
+                name="export-status"
+                value="all"
+                checked={exportStatus === "all"}
+                onChange={() => setExportStatus("all")}
+              />
+              <span className="export-radio-copy">
+                <strong>Collected and not collected</strong>
+                <small>Both in one sheet — not collected rows are highlighted red.</small>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div className="export-section">
+          <span className="export-section-label">Campaign date</span>
+          <div className="pickup-filter-group pickup-date-chips export-date-chips">
+            <button
+              type="button"
+              className={`pickup-filter-btn ${exportDay === "all" ? "active" : ""}`}
+              onClick={() => setExportDay("all")}
+            >
+              All dates
+            </button>
+            <button
+              type="button"
+              className={`pickup-filter-btn ${exportDay === todayKey ? "active" : ""}`}
+              onClick={() => setExportDay(todayKey)}
+            >
+              Today
+            </button>
+            {campaignDates.slice(0, 8).map((item) => (
+              <button
+                key={item.day}
+                type="button"
+                className={`pickup-filter-btn ${exportDay === item.day ? "active" : ""}`}
+                onClick={() => setExportDay(item.day)}
+              >
+                {formatCampaignDay(item.day)}
+                {item.taken ? ` · ${item.taken}` : ""}
+              </button>
+            ))}
+          </div>
+          <label className="pickup-date-input-wrap">
+            <span className="sr-only">Pick campaign date</span>
+            <input
+              type="date"
+              className="form-input pickup-date-input"
+              value={dayKeyToInputValue(exportDay === "all" ? todayKey : exportDay)}
+              onChange={(e) => setExportDay(inputValueToDayKey(e.target.value) || "all")}
+            />
+          </label>
+        </div>
+
+        {exportCampaignsOnDay.length > 0 && (
+          <div className="form-group pickup-campaign-select export-section">
+            <label className="form-label" htmlFor="export-campaign-filter">
+              Campaign on this date
+            </label>
+            <select
+              id="export-campaign-filter"
+              className="form-select"
+              value={exportCampaignId}
+              onChange={(e) => setExportCampaignId(e.target.value)}
+            >
+              <option value="">
+                All campaigns{exportDay !== "all" ? ` · ${formatCampaignDay(exportDay)}` : ""}
+              </option>
+              {exportCampaignsOnDay.map((campaign) => (
+                <option key={campaign.id} value={campaign.id}>
+                  {campaign.name} · {campaign.stats?.taken || 0} collected
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="export-sheet-summary">
+          <span className="chip-badge chip-success">{exportScope.taken} collected</span>
+          <span className="chip-badge chip-warning">{exportScope.pending} not collected</span>
+          <span className="chip-badge">{exportScope.total} total</span>
+        </div>
+
+        <div className="export-sheet-actions">
+          <button type="button" className="btn-secondary" onClick={() => setExportOpen(false)}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={runExport}
+            disabled={!socketConnected || exportScope.total === 0}
+          >
+            <IconSpreadsheet className="w-4 h-4 mr-1.5" />
+            <span>Export Excel</span>
+          </button>
+        </div>
+      </aside>
     </div>
   );
 }

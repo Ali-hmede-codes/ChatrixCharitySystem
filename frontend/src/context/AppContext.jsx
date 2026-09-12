@@ -537,15 +537,30 @@ export function AppProvider({ children }) {
 
     socket.on("pickup:export-data", (data) => {
       const rows = Array.isArray(data?.items) ? data.items : [];
+      const wantStatus =
+        data?.status === "pending" || data?.status === "all" ? data.status : "taken";
       if (!rows.length) {
-        showToast("No collected people match this campaign date to export.", "warning");
+        const noneMsg =
+          wantStatus === "taken"
+            ? "No collected people match this campaign date to export."
+            : wantStatus === "pending"
+              ? "No not-collected people match this campaign date to export."
+              : "No people match this campaign date to export.";
+        showToast(noneMsg, "warning");
         return;
       }
       const saved = downloadCollectedExcel(rows, {
         campaignDay: data?.campaignDay || "all",
         campaignName: rows.length === 1 ? rows[0].campaignName : "",
+        status: wantStatus,
       });
-      showToast(`Exported ${saved.count} collected ${saved.count === 1 ? "person" : "people"} to Excel.`, "success");
+      const label =
+        wantStatus === "taken"
+          ? "collected"
+          : wantStatus === "pending"
+            ? "not-collected"
+            : "collected and not-collected";
+      showToast(`Exported ${saved.count} ${label} ${saved.count === 1 ? "person" : "people"} to Excel.`, "success");
     });
 
     socket.on("pickup:done", (event) => {
