@@ -454,6 +454,9 @@ export function createCampaignService(ctx) {
               takenAidId: "",
               printCount: 0,
               pickups: [],
+              messageIds: [],
+              sentAt: null,
+              jid: "",
             });
           } else {
             existing.names = collapsePersonNames([...existing.names, ...names]);
@@ -474,7 +477,7 @@ export function createCampaignService(ctx) {
     return newCampaign;
   }
 
-  function updateRecipient(campaignId, { phone, state, channel, detail, sentNames }) {
+  function updateRecipient(campaignId, { phone, state, channel, detail, sentNames, messageIds, sentAt, jid }) {
     const campaign = campaigns.find((c) => c.id === String(campaignId));
     if (!campaign) return;
 
@@ -494,6 +497,9 @@ export function createCampaignService(ctx) {
         takenAidId: "",
         printCount: 0,
         pickups: [],
+        messageIds: [],
+        sentAt: null,
+        jid: "",
       };
       campaign.recipients.push(target);
       ensurePickups(target);
@@ -505,6 +511,15 @@ export function createCampaignService(ctx) {
     if (Array.isArray(sentNames)) {
       target.sentNames = sentNames.map((name) => String(name || "").replace(/\s+/g, " ").trim()).filter(Boolean);
     }
+    if (Array.isArray(messageIds)) {
+      const incoming = messageIds.map((id) => String(id || "")).filter(Boolean);
+      const existing = Array.isArray(target.messageIds) ? target.messageIds : [];
+      target.messageIds = Array.from(new Set([...existing, ...incoming]));
+    }
+    if (sentAt !== undefined && sentAt !== null) {
+      target.sentAt = Number(sentAt) || null;
+    }
+    if (jid) target.jid = String(jid);
     target.updatedAt = Date.now();
     recountStats(campaign);
     // States where a message was actually sent or a final decision made are
@@ -709,6 +724,30 @@ export function createCampaignService(ctx) {
     return { ok: true, deleted: removedIds.length, ids: removedIds };
   }
 
+  // Gather the sent-message data needed to recall (unsend) the WhatsApp
+  // messages of one or more campaigns. Called BEFORE the campaign rows are
+  // removed, so the recipient jid/messageIds/sentAt are still in memory.
+  // Returns [{ name, items: [{ phone, jid, messageIds, sentAt }] }].
+  function collectRecallable(ids) {
+    const wanted = new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || "")).filter(Boolean));
+    const out = [];
+    for (const c of campaigns) {
+      if (!wanted.has(c.id)) continue;
+      const items = (c.recipients || [])
+        .map((r) => ({
+          phone: String(r.phone || ""),
+          jid: String(r.jid || ""),
+          messageIds: Array.isArray(r.messageIds)
+            ? r.messageIds.map((id) => String(id || "")).filter(Boolean)
+            : [],
+          sentAt: Number(r.sentAt) || 0,
+        }))
+        .filter((it) => it.phone && it.messageIds.length);
+      if (items.length) out.push({ name: c.name || "Untitled Campaign", items });
+    }
+    return out;
+  }
+
   function mergePickupLists(left, right) {
     const byKey = new Map();
     for (const pickup of [...(left || []), ...(right || [])]) {
@@ -767,6 +806,13 @@ export function createCampaignService(ctx) {
     );
     base.updatedAt = Math.max(Number(base.updatedAt) || 0, Number(extra.updatedAt) || 0) || Date.now();
     base.pickups = mergePickupLists(base.pickups, extra.pickups);
+    // Preserve sent message IDs from both sides so a merged campaign can
+    // still recall messages that were sent under either original batch.
+    const baseIds = Array.isArray(base.messageIds) ? base.messageIds : [];
+    const extraIds = Array.isArray(extra.messageIds) ? extra.messageIds : [];
+    base.messageIds = Array.from(new Set([...baseIds, ...extraIds]));
+    base.sentAt = [base.sentAt, extra.sentAt].filter(Boolean).sort((a, b) => a - b)[0] || null;
+    base.jid = base.jid || extra.jid || "";
     ensurePickups(base);
     return base;
   }
@@ -1095,6 +1141,7 @@ export function createCampaignService(ctx) {
     finishCampaign,
     delete: deleteCampaign,
     deleteMany,
+    collectRecallable,
     merge: mergeCampaigns,
     emit,
     searchPickup,

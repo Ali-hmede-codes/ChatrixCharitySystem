@@ -30,6 +30,7 @@ export function AppProvider({ children }) {
     apiKeyMasked: "",
     ready: false,
     deliveryWaitMinutes: 10,
+    recallWindowMinutes: 15,
   });
   const [messageSettings, setMessageSettings] = useState({
     useNameTemplate: false,
@@ -352,7 +353,12 @@ export function AppProvider({ children }) {
     });
 
     socket.on("send:notice", (msg) => {
-      if (msg) showToast(msg, "warning");
+      if (!msg) return;
+      const text = typeof msg === "string" ? msg : msg.message;
+      const level = typeof msg === "string" ? "warning" : msg.level || "info";
+      if (!text) return;
+      const type = level === "success" ? "success" : level === "warn" || level === "warning" ? "warning" : level === "error" ? "error" : "info";
+      showToast(text, type);
     });
 
     // SMS & Message & Brand settings

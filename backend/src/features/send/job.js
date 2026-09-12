@@ -459,6 +459,7 @@ export function createSendService(ctx) {
         } else {
           const outgoing = texts.length ? texts : [text];
           const sentSoFar = [...alreadySent];
+          const sentMessageIds = [];
           let lastResult = null;
           let stoppedMid = false;
 
@@ -490,6 +491,7 @@ export function createSendService(ctx) {
               stoppedMid = true;
               break;
             }
+            if (lastResult?.id) sentMessageIds.push(String(lastResult.id));
             if (perPerson && pendingNames[m]) {
               sentSoFar.push(pendingNames[m]);
               recipient.sentNames = sentSoFar;
@@ -513,6 +515,8 @@ export function createSendService(ctx) {
                 channel: "none",
                 detail: "Stopped before send · will retry if you resume",
                 sentNames: sentSoFar,
+                messageIds: sentMessageIds,
+                jid: target.jid,
               });
             }
             break;
@@ -520,6 +524,7 @@ export function createSendService(ctx) {
 
           sendJob.sent += 1;
           delivery.trackDelivery(batch, { phone, messageId: lastResult?.id, waitReason: "sent", text });
+          const sentAt = Date.now();
           const waitingDetail = enableSms
             ? `Sent · waiting ${deliveryWaitMinutes()} minutes for delivery (SMS fallback active)`
             : "Sent · waiting for delivery (SMS off for this campaign)";
@@ -538,6 +543,9 @@ export function createSendService(ctx) {
               channel: "whatsapp",
               detail: waitingDetail,
               sentNames: sentSoFar,
+              messageIds: sentMessageIds,
+              sentAt,
+              jid: target.jid,
             });
           }
           index += 1;
@@ -892,6 +900,112 @@ export function createSendService(ctx) {
     }
   }, 3_000);
 
+  // Recall (unsend) the WhatsApp messages that were sent to every number in
+  // a campaign, but only if they were sent within the configured recall
+  // window (default 15 minutes). WhatsApp only lets the sender revoke a
+  // message for everyone within a short window, so older sends are skipped.
+  // Runs entirely server-side in the background so the user's connection
+  // (or a Wi-Fi drop) doesn't affect it — the UI only gets progress notices.
+  function recallMessages(items, campaignName) {
+    const windowMs = ctx.services.sms?.recallWindowMs?.() ?? 0;
+    if (!windowMs) {
+      ctx.io.emit("send:notice", {
+        level: "info",
+        message: `Recall is turned off — the messages sent for "${campaignName}" were not deleted from recipients' chats.`,
+      });
+      return;
+    }
+    const windowMin = Math.round(windowMs / 60_000);
+    const recallable = (Array.isArray(items) ? items : [])
+      .map((it) => ({
+        phone: String(it?.phone || ""),
+        jid: String(it?.jid || ""),
+        messageIds: Array.isArray(it?.messageIds) ? it.messageIds.map((id) => String(id || "")).filter(Boolean) : [],
+        sentAt: Number(it?.sentAt) || 0,
+      }))
+      .filter((it) => it.phone && it.messageIds.length && it.sentAt && Date.now() - it.sentAt <= windowMs);
+
+    const totalIds = recallable.reduce((n, it) => n + it.messageIds.length, 0);
+    if (!totalIds) {
+      ctx.io.emit("send:notice", {
+        level: "info",
+        message: `No messages to recall for "${campaignName}" — none were sent within the last ${windowMin} minutes.`,
+      });
+      return;
+    }
+    ctx.io.emit("send:notice", {
+      level: "info",
+      message: `Deleting ${totalIds} sent message${totalIds === 1 ? "" : "s"} from "${campaignName}" (recall window ${windowMin} min).`,
+    });
+    runRecall(recallable, campaignName, windowMs).catch((error) => {
+      ctx.logger.warn({ err: error }, "recall job failed");
+      ctx.io.emit("send:notice", {
+        level: "warn",
+        message: `Recall for "${campaignName}" stopped: ${error.message || "unexpected error"}.`,
+      });
+    });
+  }
+
+  async function runRecall(items, campaignName, windowMs) {
+    let ok = 0;
+    let fail = 0;
+    let skipped = 0;
+    for (const it of items) {
+      if (!ctx.services.whatsapp?.isOpen?.()) {
+        ctx.io.emit("send:notice", {
+          level: "warn",
+          message: `WhatsApp disconnected — recall for "${campaignName}" paused. Reconnect and delete the campaign again to finish.`,
+        });
+        break;
+      }
+      // Prefer the exact jid the message was sent to (stored on the
+      // recipient). Fall back to resolving it from the phone for old data.
+      let jid = it.jid;
+      if (!jid) {
+        try {
+          const target = await ctx.services.whatsapp.resolveTarget(it.phone);
+          if (!target || target.skip) {
+            skipped += it.messageIds.length;
+            continue;
+          }
+          jid = target.jid;
+        } catch {
+          skipped += it.messageIds.length;
+          continue;
+        }
+      }
+      const client = ctx.services.whatsapp.getClient();
+      for (const messageId of it.messageIds) {
+        if (!ctx.services.whatsapp?.isOpen?.()) break;
+        if (Date.now() - it.sentAt > windowMs) {
+          skipped += 1;
+          continue;
+        }
+        try {
+          await withTimeout(
+            client.message.send(jid, {
+              type: "revoke",
+              target: { remoteJid: jid, id: messageId, fromMe: true },
+            }),
+            20_000,
+            "Recall timed out"
+          );
+          ok += 1;
+        } catch (error) {
+          fail += 1;
+          ctx.logger.warn({ err: error, phone: it.phone, messageId }, "recall failed");
+        }
+        // Pace the recalls so we don't trip WhatsApp's rate limiter.
+        await waitGap(1_500, () => false);
+      }
+    }
+    const level = fail === 0 ? "success" : ok === 0 ? "warn" : "info";
+    ctx.io.emit("send:notice", {
+      level,
+      message: `Recall for "${campaignName}" done: ${ok} deleted, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}.`,
+    });
+  }
+
   return {
     start,
     resume,
@@ -903,5 +1017,6 @@ export function createSendService(ctx) {
     isPaused: () => sendJob.paused,
     getStatus: publicStatus,
     sync,
+    recallMessages,
   };
 }

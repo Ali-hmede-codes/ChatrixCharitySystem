@@ -131,7 +131,12 @@ export function CampaignsScreen() {
     const title = list.length === 1
       ? `Delete campaign "${campaigns.find((c) => c.id === list[0])?.name || "this campaign"}"?`
       : `Delete ${list.length} campaigns?`;
-    if (!window.confirm(`${title}\n\nThis removes the campaign and its people from Chatrix. This cannot be undone.`)) {
+    const recallMin = Number(smsSettings.recallWindowMinutes) || 0;
+    const recallLine =
+      recallMin > 0
+        ? `\n\nMessages sent in the last ${recallMin} minutes will be unsent (deleted for everyone) from recipients' WhatsApp chats.`
+        : `\n\nRecall is turned off — sent messages will stay in recipients' chats.`;
+    if (!window.confirm(`${title}\n\nThis removes the campaign and its people from Chatrix. This cannot be undone.${recallLine}`)) {
       return;
     }
     deleteCampaigns(list);

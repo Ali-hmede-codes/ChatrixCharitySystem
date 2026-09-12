@@ -7,13 +7,23 @@ export function createSmsService(ctx) {
   const { SMS_SETTINGS_PATH, SMS_SEND_URL, SMS_GAP_MS } = ctx.config;
   const store = createJsonStore(SMS_SETTINGS_PATH, { enabled: false, apiKey: "", from: "" });
   const queue = [];
-  let settings = { enabled: false, apiKey: "", from: "", deliveryWaitMinutes: 10 };
+  let settings = { enabled: false, apiKey: "", from: "", deliveryWaitMinutes: 10, recallWindowMinutes: 15 };
   let busy = false;
 
   function clampMinutes(value) {
     const n = Math.trunc(Number(value));
     if (!Number.isFinite(n) || n < 1) return 10;
     if (n > 120) return 120;
+    return n;
+  }
+
+  // Recall (unsend) window for messages sent by a campaign. 0 disables recall
+  // entirely. Capped at 180 minutes: WhatsApp only lets you revoke a message
+  // for everyone within a short window, so longer values are pointless.
+  function clampRecallMinutes(value) {
+    const n = Math.trunc(Number(value));
+    if (!Number.isFinite(n) || n < 0) return 15;
+    if (n > 180) return 180;
     return n;
   }
 
@@ -24,6 +34,7 @@ export function createSmsService(ctx) {
       apiKey: String(raw?.apiKey || "").trim(),
       from: normalizeFromNumber(raw?.from),
       deliveryWaitMinutes: clampMinutes(raw?.deliveryWaitMinutes ?? 10),
+      recallWindowMinutes: clampRecallMinutes(raw?.recallWindowMinutes ?? 15),
     };
     return settings;
   }
@@ -34,6 +45,7 @@ export function createSmsService(ctx) {
       apiKey: settings.apiKey,
       from: settings.from,
       deliveryWaitMinutes: settings.deliveryWaitMinutes,
+      recallWindowMinutes: settings.recallWindowMinutes,
     });
   }
 
@@ -45,6 +57,11 @@ export function createSmsService(ctx) {
     return Math.max(1, Number(settings.deliveryWaitMinutes) || 10) * 60_000;
   }
 
+  function recallWindowMs() {
+    const n = Math.max(0, Number(settings.recallWindowMinutes) || 0);
+    return n * 60_000;
+  }
+
   function publicSettings() {
     return {
       enabled: Boolean(settings.enabled),
@@ -53,6 +70,7 @@ export function createSmsService(ctx) {
       apiKeyMasked: maskApiKey(settings.apiKey),
       ready: ready(),
       deliveryWaitMinutes: Number(settings.deliveryWaitMinutes) || 10,
+      recallWindowMinutes: Number(settings.recallWindowMinutes) || 0,
     };
   }
 
@@ -117,6 +135,7 @@ export function createSmsService(ctx) {
       apiKey: nextKey || settings.apiKey,
       from: fromDigits ? `+${fromDigits}` : "",
       deliveryWaitMinutes: clampMinutes(payload?.deliveryWaitMinutes ?? settings.deliveryWaitMinutes),
+      recallWindowMinutes: clampRecallMinutes(payload?.recallWindowMinutes ?? settings.recallWindowMinutes),
     };
     try {
       await write();
@@ -146,5 +165,6 @@ export function createSmsService(ctx) {
     enqueue,
     isEnabled: () => Boolean(settings.enabled),
     deliveryWaitMs,
+    recallWindowMs,
   };
 }

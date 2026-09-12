@@ -38,6 +38,11 @@ export function createCampaignRepository(ctx) {
       sentNames: Array.isArray(r.sentNames)
         ? r.sentNames.map((name) => String(name || "").replace(/\s+/g, " ").trim()).filter(Boolean)
         : [],
+      messageIds: Array.isArray(r.messageIds)
+        ? r.messageIds.map((id) => String(id || "")).filter(Boolean)
+        : [],
+      sentAt: r.sentAt ? Number(r.sentAt) : null,
+      jid: String(r.jid || ""),
       pickups: Array.isArray(r.pickups)
         ? r.pickups
             .map((p) => {

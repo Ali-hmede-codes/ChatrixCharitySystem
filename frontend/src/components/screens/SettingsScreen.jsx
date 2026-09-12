@@ -32,6 +32,9 @@ export function SettingsScreen() {
   const [smsApiKey, setSmsApiKey] = useState("");
   const [smsFrom, setSmsFrom] = useState(smsSettings.from || "");
   const [smsWaitMinutes, setSmsWaitMinutes] = useState(smsSettings.deliveryWaitMinutes || 10);
+  const [smsRecallMinutes, setSmsRecallMinutes] = useState(
+    smsSettings.recallWindowMinutes === undefined ? 15 : smsSettings.recallWindowMinutes
+  );
   const [paperWidthMm, setPaperWidthMm] = useState(printerSettings.paperWidthMm || 80);
   const [headerText, setHeaderText] = useState(printerSettings.headerText || "");
 
@@ -44,7 +47,10 @@ export function SettingsScreen() {
     setSmsEnabled(Boolean(smsSettings.enabled));
     setSmsFrom(smsSettings.from || "");
     setSmsWaitMinutes(Number(smsSettings.deliveryWaitMinutes) || 10);
-  }, [smsSettings.enabled, smsSettings.from, smsSettings.deliveryWaitMinutes]);
+    setSmsRecallMinutes(
+      smsSettings.recallWindowMinutes === undefined ? 15 : Number(smsSettings.recallWindowMinutes)
+    );
+  }, [smsSettings.enabled, smsSettings.from, smsSettings.deliveryWaitMinutes, smsSettings.recallWindowMinutes]);
 
   const fromPreview = normalizePhone(smsFrom);
   const fromIssue = describePhoneIssue(smsFrom);
@@ -72,6 +78,7 @@ export function SettingsScreen() {
       apiKey: smsApiKey.trim(),
       from: smsFrom.trim(),
       deliveryWaitMinutes: Number(smsWaitMinutes) || 10,
+      recallWindowMinutes: Number(smsRecallMinutes) || 0,
     });
     setSmsApiKey("");
   }
@@ -418,6 +425,29 @@ export function SettingsScreen() {
               <span className="form-hint">
                 How long to wait for WhatsApp delivery before sending SMS. 1–120 minutes. Default 10.
                 Applies to every campaign — even with SMS off, a number is marked undelivered after this time.
+              </span>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="sms-recall-input">
+                Recall (unsend) window when deleting a campaign (minutes)
+              </label>
+              <input
+                id="sms-recall-input"
+                type="number"
+                min="0"
+                max="180"
+                step="1"
+                className="form-input"
+                value={smsRecallMinutes}
+                onChange={(e) =>
+                  setSmsRecallMinutes(Math.max(0, Math.min(180, Number(e.target.value) || 0)))
+                }
+              />
+              <span className="form-hint">
+                When you delete a campaign, Chatrix tries to unsend (delete for everyone) the WhatsApp
+                messages that were sent to its numbers — but only those sent within this many minutes.
+                WhatsApp itself blocks revoking older messages. 0 turns recall off. Default 15.
               </span>
             </div>
 
