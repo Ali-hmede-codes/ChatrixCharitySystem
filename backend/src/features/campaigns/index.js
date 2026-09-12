@@ -20,14 +20,14 @@ export const campaignsFeature = {
         socket.emit("campaigns:details", details);
       });
 
-      socket.on("campaigns:update", (payload) => {
-        const result = campaigns.update(payload?.id, payload || {});
+      socket.on("campaigns:update", async (payload) => {
+        const result = await campaigns.update(payload?.id, payload || {});
         if (!result.ok) socket.emit("campaigns:error", result.error);
         else socket.emit("campaigns:saved", result);
       });
 
-      socket.on("campaigns:remove-recipients", (payload) => {
-        const result = campaigns.removeRecipients(payload?.id || payload?.campaignId, payload?.phones);
+      socket.on("campaigns:remove-recipients", async (payload) => {
+        const result = await campaigns.removeRecipients(payload?.id || payload?.campaignId, payload?.phones);
         if (!result.ok) socket.emit("campaigns:error", result.error);
         else socket.emit("campaigns:saved", result);
       });
@@ -44,8 +44,8 @@ export const campaignsFeature = {
         else socket.emit("campaigns:deleted", result);
       });
 
-      socket.on("campaigns:merge", (payload) => {
-        const result = campaigns.merge(payload?.ids, { name: payload?.name });
+      socket.on("campaigns:merge", async (payload) => {
+        const result = await campaigns.merge(payload?.ids, { name: payload?.name });
         if (!result.ok) socket.emit("campaigns:error", result.error);
         else socket.emit("campaigns:merged", result);
       });

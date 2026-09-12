@@ -53,6 +53,8 @@ export function createCampaignService(ctx) {
     if (changed) scheduleSave();
   }
 
+  let saveInFlight = null;
+
   function scheduleSave() {
     if (saveTimer) return;
     saveTimer = setTimeout(async () => {
@@ -63,6 +65,27 @@ export function createCampaignService(ctx) {
         ctx.logger.error({ err }, "failed saving campaigns to disk");
       }
     }, 1_000);
+  }
+
+  // Write to disk immediately and cancel any pending debounced save.
+  // Used for critical state changes (create/merge/delete) so a restart or
+// Wi-Fi-induced reconnect can never lose a just-created campaign.
+  async function persistNow() {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    if (saveInFlight) await saveInFlight;
+    saveInFlight = (async () => {
+      try {
+        await repo.write(campaigns);
+      } catch (err) {
+        ctx.logger.error({ err }, "failed saving campaigns to disk");
+      } finally {
+        saveInFlight = null;
+      }
+    })();
+    return saveInFlight;
   }
 
   function scheduleSeqSave() {
@@ -393,7 +416,7 @@ export function createCampaignService(ctx) {
 
     recountStats(newCampaign);
     campaigns = [newCampaign, ...campaigns.filter((c) => c.id !== newCampaign.id)];
-    scheduleSave();
+    await persistNow();
     ctx.io.emit("campaigns:data", { campaigns: list() });
     ctx.io.emit("campaigns:update", publicSummary(newCampaign));
     return newCampaign;
@@ -502,7 +525,7 @@ export function createCampaignService(ctx) {
       // Recipients are source of truth; still keep summary as fallback extras.
       recountStats(campaign);
     }
-    scheduleSave();
+    await persistNow();
     ctx.io.emit("campaigns:data", { campaigns: list() });
     ctx.io.emit("campaigns:update", publicSummary(campaign));
     ctx.io.emit("send:resumable", { campaigns: listResumable() });
@@ -520,7 +543,14 @@ export function createCampaignService(ctx) {
     ctx.io.emit("send:resumable", { campaigns: listResumable() });
   }
 
-  function updateCampaign(campaignId, patch = {}) {
+  async function publishCampaignNow(campaign) {
+    await persistNow();
+    ctx.io.emit("campaigns:data", { campaigns: list() });
+    if (campaign) ctx.io.emit("campaigns:update", publicSummary(campaign));
+    ctx.io.emit("send:resumable", { campaigns: listResumable() });
+  }
+
+  async function updateCampaign(campaignId, patch = {}) {
     const campaign = campaigns.find((c) => c.id === String(campaignId));
     if (!campaign) return { ok: false, error: "Campaign not found." };
 
@@ -542,11 +572,11 @@ export function createCampaignService(ctx) {
       campaign.sendOptions.enableSms = next;
     }
 
-    publishCampaign(campaign);
+    await publishCampaignNow(campaign);
     return { ok: true, campaign: publicSummary(campaign), details: get(campaign.id) };
   }
 
-  function removeRecipients(campaignId, phones = []) {
+  async function removeRecipients(campaignId, phones = []) {
     const campaign = campaigns.find((c) => c.id === String(campaignId));
     if (!campaign) return { ok: false, error: "Campaign not found." };
 
@@ -582,7 +612,7 @@ export function createCampaignService(ctx) {
     campaign.recipients = next;
     recountStats(campaign);
     campaign.totalRecipients = next.length;
-    publishCampaign(campaign);
+    await publishCampaignNow(campaign);
     return {
       ok: true,
       removed,
@@ -601,7 +631,7 @@ export function createCampaignService(ctx) {
     const before = campaigns.length;
     campaigns = campaigns.filter((c) => c.id !== id);
     if (campaigns.length === before) return { ok: false, error: "Campaign not found." };
-    publishCampaign(null);
+    await publishCampaignNow(null);
     return { ok: true, deleted: 1, ids: [id] };
   }
 
@@ -615,7 +645,7 @@ export function createCampaignService(ctx) {
     const removedIds = campaigns.filter((c) => wanted.has(c.id)).map((c) => c.id);
     if (!removedIds.length) return { ok: false, error: "No matching campaigns to delete." };
     campaigns = campaigns.filter((c) => !wanted.has(c.id));
-    publishCampaign(null);
+    await publishCampaignNow(null);
     return { ok: true, deleted: removedIds.length, ids: removedIds };
   }
 
@@ -666,7 +696,7 @@ export function createCampaignService(ctx) {
     return base;
   }
 
-  function mergeCampaigns(ids, { name } = {}) {
+  async function mergeCampaigns(ids, { name } = {}) {
     const wanted = (Array.isArray(ids) ? ids : []).map((id) => String(id || "")).filter(Boolean);
     const uniqueIds = [...new Set(wanted)];
     if (uniqueIds.length < 2) {
@@ -760,7 +790,7 @@ export function createCampaignService(ctx) {
 
     const sourceIds = sources.map((c) => c.id);
     campaigns = [merged, ...campaigns.filter((c) => !sourceIds.includes(c.id))];
-    publishCampaign(merged);
+    await publishCampaignNow(merged);
     return {
       ok: true,
       campaign: publicSummary(merged),

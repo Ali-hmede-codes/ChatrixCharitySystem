@@ -224,6 +224,10 @@ export function SendScreen() {
   }
 
   function handleStartSend() {
+    if (sendingBusy) {
+      showToast("A send is already running or paused. Stop it or resume before starting a new one.", "warning");
+      return;
+    }
     if (waState !== "open") {
       showToast("Link WhatsApp first before sending.", "error");
       return;

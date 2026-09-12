@@ -10,6 +10,7 @@ const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
   const socketRef = useRef(null);
+  const hadConnectionRef = useRef(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -141,12 +142,17 @@ export function AppProvider({ children }) {
       socket.emit("campaigns:list");
       socket.emit("send:sync");
       socket.emit("printer:get");
+      if (hadConnectionRef.current) {
+        showToast("Reconnected to Chatrix. Campaigns and send status refreshed.", "success");
+      }
+      hadConnectionRef.current = true;
     });
 
     socket.on("disconnect", () => {
       setSocketConnected(false);
       pickupBusyRef.current = false;
       setPickupBusy(false);
+      showToast("Lost connection to Chatrix. Your campaigns stay saved. Reconnecting…", "warning");
     });
 
     socket.on("wa:status", (event) => {
@@ -600,7 +606,14 @@ export function AppProvider({ children }) {
   }
 
   function startSend(recipientsList, text, options = {}) {
-    if (!socketRef.current || sendJob.running) return;
+    if (!socketRef.current) return;
+    if (sendJob.running) {
+      showToast(
+        "A send is already running. Wait for it to finish, or press Stop Sending first. Your campaign was not launched.",
+        "warning"
+      );
+      return;
+    }
     if (!navigator.onLine) {
       showToast("This computer is offline. Reconnect Wi-Fi, then launch the campaign.", "warning");
       return;
