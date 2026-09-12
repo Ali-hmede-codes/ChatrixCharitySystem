@@ -1,6 +1,6 @@
 import { createCampaignRepository } from "./repository.js";
 import { plusPhone } from "../../shared/phone.js";
-import { namesFromRecipient, namesEqual, personSlots, uniquePersonNames } from "../../shared/names.js";
+import { namesFromRecipient, namesEqual, personSlots, uniquePersonNames, collapsePersonNames } from "../../shared/names.js";
 import { matchesText, normalizeSearch } from "../../shared/search.js";
 import { campaignDayKey, formatAidId, maxAidSeqForDay } from "../../shared/aid-id.js";
 import { isRecipientPending, pauseCopy } from "../send/interrupt.js";
@@ -418,7 +418,7 @@ export function createCampaignService(ctx) {
               pickups: [],
             });
           } else {
-            existing.names = uniquePersonNames([...existing.names, ...names]);
+            existing.names = collapsePersonNames([...existing.names, ...names]);
             existing.name = existing.names.join(" + ") || existing.name;
             if (!existing.code && code) existing.code = code;
           }
@@ -698,7 +698,7 @@ export function createCampaignService(ctx) {
   function mergeTwoRecipients(base, extra) {
     ensurePickups(base);
     ensurePickups(extra);
-    const names = uniquePersonNames([...namesFromRecipient(base), ...namesFromRecipient(extra)]);
+    const names = collapsePersonNames([...namesFromRecipient(base), ...namesFromRecipient(extra)]);
     const preferExtra = (STATE_RANK[extra.state] || 0) > (STATE_RANK[base.state] || 0);
     const winner = preferExtra ? extra : base;
     const loser = preferExtra ? base : extra;
@@ -708,7 +708,17 @@ export function createCampaignService(ctx) {
     base.state = winner.state || base.state;
     base.channel = winner.channel && winner.channel !== "none" ? winner.channel : loser.channel || "none";
     base.detail = winner.detail || loser.detail || "";
-    base.sentNames = uniquePersonNames([...(base.sentNames || []), ...(extra.sentNames || [])]);
+    // Reconcile already-sent names against the collapsed name list so a person
+    // messaged under a shorter name in one batch (e.g. "Ahmad") is not re-sent
+    // under their fuller name (e.g. "Ahmad Ali") after merging batches.
+    const sentRaw = uniquePersonNames([...(base.sentNames || []), ...(extra.sentNames || [])]);
+    base.sentNames = names.filter((name) =>
+      sentRaw.some((s) => {
+        const a = name.toLowerCase();
+        const b = s.toLowerCase();
+        return a === b || a.startsWith(b + " ") || b.startsWith(a + " ");
+      })
+    );
     base.updatedAt = Math.max(Number(base.updatedAt) || 0, Number(extra.updatedAt) || 0) || Date.now();
     base.pickups = mergePickupLists(base.pickups, extra.pickups);
     ensurePickups(base);

@@ -69,7 +69,29 @@ export function personNames(item) {
   for (const name of split) {
     if (!unique.some((existing) => namesEqual(existing, name))) unique.push(name);
   }
-  return unique;
+  return collapsePersonNames(unique);
+}
+
+// Mirror of the backend collapse: drop a name that is a word-prefix of a
+// longer one (e.g. "Ahmad" when "Ahmad Ali" exists) so the same person is not
+// messaged twice under two spellings. Households like "Ahmad" + "Sara" stay.
+export function collapsePersonNames(list) {
+  const names = [];
+  for (const value of list || []) {
+    const name = String(value || "").replace(/\s+/g, " ").trim();
+    if (!name || /^\d+$/.test(name)) continue;
+    if (names.some((item) => namesEqual(item, name))) continue;
+    names.push(name);
+  }
+  return names.filter((name) => {
+    return !names.some((other) => {
+      if (other === name) return false;
+      return (
+        other.toLowerCase().startsWith(name.toLowerCase() + " ") ||
+        namesEqual(other, name)
+      );
+    });
+  });
 }
 
 export function contactSaveName(item) {

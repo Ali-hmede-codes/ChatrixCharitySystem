@@ -27,11 +27,11 @@ export const config = {
   LOCK_PORT: Number(process.env.LOCK_PORT) || 4179,
   SESSION_ID: "default",
   MAX_PEOPLE: 400,
-  SEND_GAP_MIN_MS: 9_000,
-  SEND_GAP_MAX_MS: 18_000,
-  REST_EVERY: 7,
-  REST_MIN_MS: 40_000,
-  REST_MAX_MS: 80_000,
+  // Fixed pace: each recipient takes exactly this long (typing + send + wait).
+  // 10s/recipient = 360/hour, conservative enough to avoid WhatsApp limits.
+  SEND_PACE_MS: 10_000,
+  // Pause between a household's per-person messages (same phone, multiple names).
+  FAMILY_GAP_MS: 1_500,
   DELIVERY_WAIT_MS: 10 * 60 * 1000,
   SMS_SEND_URL: "https://api.httpsms.com/v1/messages/send",
   SMS_GAP_MS: 3_000,

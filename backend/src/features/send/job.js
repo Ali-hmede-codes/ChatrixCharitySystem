@@ -1,4 +1,4 @@
-import { jitter, waitGap, delay, withTimeout } from "../../shared/delay.js";
+import { waitGap, delay, withTimeout } from "../../shared/delay.js";
 import {
   namesFromRecipient,
   namesEqual,
@@ -238,7 +238,7 @@ export function createSendService(ctx) {
       campaignId: campaign?.id || null,
       enableSms,
     });
-    const { SEND_GAP_MIN_MS, SEND_GAP_MAX_MS, REST_EVERY, REST_MIN_MS, REST_MAX_MS } = ctx.config;
+    const { SEND_PACE_MS, FAMILY_GAP_MS } = ctx.config;
     const offset = Math.max(0, (campaign?.totalRecipients || recipients.length) - recipients.length);
 
     let index = 0;
@@ -247,6 +247,7 @@ export function createSendService(ctx) {
       const ready = await waitUntilCanSend();
       if (!ready) break;
 
+      const recipientStartedAt = Date.now();
       const recipient = recipients[index];
       const { phone, names } = recipient;
       const extras = extrasFor(recipient);
@@ -358,7 +359,7 @@ export function createSendService(ctx) {
 
           for (let m = 0; m < outgoing.length; m += 1) {
             if (m > 0) {
-              await waitGap(jitter(4_000, 8_000), isCancelled);
+              await waitGap(FAMILY_GAP_MS, isCancelled);
               if (sendJob.cancelled) {
                 stoppedMid = true;
                 break;
@@ -495,11 +496,11 @@ export function createSendService(ctx) {
       }
 
       if (index < recipients.length && !sendJob.cancelled) {
-        const rest = (offset + index) % REST_EVERY === 0;
-        await waitGap(
-          rest ? jitter(REST_MIN_MS, REST_MAX_MS) : jitter(SEND_GAP_MIN_MS, SEND_GAP_MAX_MS),
-          isCancelled
-        );
+        // Fixed pace: make each recipient cycle take SEND_PACE_MS (10s) total,
+        // regardless of typing/send duration. No random jitter, no long rests.
+        const elapsed = Date.now() - recipientStartedAt;
+        const remaining = Math.max(0, SEND_PACE_MS - elapsed);
+        if (remaining > 0) await waitGap(remaining, isCancelled);
       }
     }
 

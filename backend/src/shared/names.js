@@ -27,6 +27,24 @@ export function uniquePersonNames(list) {
   return names;
 }
 
+// Collapse names that look like the same person recorded with different
+// completeness across Excel batches (e.g. "Ahmad" and "Ahmad Ali"). If one
+// name is a word-prefix of a longer one, the shorter is dropped so the phone
+// gets a single message addressed to the most complete name — not one per
+// spelling. Genuine households ("Ahmad" + "Sara") are left untouched because
+// neither is a prefix of the other.
+export function collapsePersonNames(list) {
+  const names = uniquePersonNames(list);
+  return names.filter((name) => {
+    const lower = name.toLowerCase();
+    return !names.some((other) => {
+      if (other === name) return false;
+      const otherLower = other.toLowerCase();
+      return otherLower.startsWith(lower + " ") || otherLower === lower;
+    });
+  });
+}
+
 export function namesFromRecipient(item) {
   const rawList =
     Array.isArray(item?.names) && item.names.length
@@ -36,7 +54,7 @@ export function namesFromRecipient(item) {
   for (const value of rawList) {
     split.push(...splitNameField(value));
   }
-  return uniquePersonNames(split);
+  return collapsePersonNames(split);
 }
 
 export function contactSaveName(item) {
