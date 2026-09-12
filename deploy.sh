@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# CloudPanel deploy for Chatrix Charity System.
-# Installs NVM + Node 20, system build tools, npm deps, frontend build, PM2.
+# Deploy Chatrix Charity System with PM2.
+# Default app folder is /var/www/CharityChatrixSystem.
+# Installs NVM + Node 20, npm deps, frontend build, then starts PM2.
 # Nginx stays as you already set it (proxy to 127.0.0.1:$APP_PORT).
 #
 # Usage:
-#   sudo bash deploy.sh
-#     (asks for CloudPanel user, domain, app port, and firewall ports)
-#   sudo bash deploy.sh --user SITEUSER --domain example.com --port 4173 --open 80,443
+#   sudo bash deploy.sh --dir /var/www/CharityChatrixSystem
+#   sudo bash deploy.sh --user www-data --dir /var/www/CharityChatrixSystem --port 4173
+#   sudo bash update.sh
+#     (after git pull: rebuild UI and show the app in pm2 list)
 #
 # If you uploaded this file from Windows and it fails with $'\r':
 #   sed -i 's/\r$//' deploy.sh && bash deploy.sh
@@ -18,7 +20,7 @@ set -euo pipefail
 # =============================================================================
 SITE_USER="${SITE_USER:-}"
 DOMAIN="${DOMAIN:-}"
-APP_DIR="${APP_DIR:-}"
+APP_DIR="${APP_DIR:-/var/www/CharityChatrixSystem}"
 REPO_URL="${REPO_URL:-https://github.com/Ali-hmede-codes/ChatrixCharitySystem.git}"
 BRANCH="${BRANCH:-main}"
 APP_NAME="${APP_NAME:-chatrix}"
@@ -39,9 +41,9 @@ usage() {
   cat <<'EOF'
 Usage: sudo bash deploy.sh [options]
 
-  --user NAME        Linux / CloudPanel site user
-  --domain NAME      Domain folder under /home/USER/htdocs/DOMAIN
-  --dir PATH         App directory (overrides --domain)
+  --user NAME        Linux user that owns the app and PM2 list
+  --domain NAME      Optional CloudPanel folder under /home/USER/htdocs
+  --dir PATH         App directory (default: /var/www/CharityChatrixSystem)
   --repo URL         Git repo to clone or pull
   --branch NAME      Git branch (default: main)
   --name NAME        PM2 process name (default: chatrix)
@@ -169,22 +171,25 @@ echo
 echo "Chatrix deploy — press Enter to keep the value in [brackets]"
 echo
 
-ask_var SITE_USER "$PROVIDED_USER" "CloudPanel site user" "$(guess_user)"
+ask_var SITE_USER "$PROVIDED_USER" "Linux user for files and PM2" "$(guess_user)"
 [ -n "$SITE_USER" ] || die "Site user is required"
-id "$SITE_USER" >/dev/null 2>&1 || die "User '$SITE_USER' does not exist. Check Sites → the site user in CloudPanel."
+id "$SITE_USER" >/dev/null 2>&1 || die "User '$SITE_USER' does not exist."
 
-ask_var DOMAIN "$PROVIDED_DOMAIN" "Domain (folder under /home/$SITE_USER/htdocs)" ""
-ask_var APP_PORT "$PROVIDED_PORT" "App port for Nginx / CloudPanel Node.js site" "4173"
-ask_var LOCK_PORT "$PROVIDED_LOCK" "Internal lock port (not used in CloudPanel)" "4179"
+if [ "$PROVIDED_DOMAIN" = 1 ]; then
+  ask_var DOMAIN "$PROVIDED_DOMAIN" "CloudPanel domain folder (optional)" ""
+fi
+ask_var APP_DIR "$PROVIDED_DIR" "App directory" "${APP_DIR:-/var/www/CharityChatrixSystem}"
+ask_var APP_PORT "$PROVIDED_PORT" "App port for Nginx" "4173"
+ask_var LOCK_PORT "$PROVIDED_LOCK" "Internal lock port" "4179"
 ask_var FIREWALL_PORTS "$PROVIDED_OPEN" "Firewall ports to allow" "80,443"
 
 if [ -z "$APP_DIR" ]; then
-  if [ "$PROVIDED_DIR" = 0 ] && [ -f "$SCRIPT_DIR/backend/package.json" ]; then
+  if [ -f "$SCRIPT_DIR/backend/package.json" ]; then
     APP_DIR="$SCRIPT_DIR"
-  elif [ -n "$DOMAIN" ]; then
+  elif [ -n "${DOMAIN:-}" ]; then
     APP_DIR="/home/${SITE_USER}/htdocs/${DOMAIN}"
   else
-    APP_DIR="/home/${SITE_USER}/htdocs/${APP_NAME}"
+    APP_DIR="/var/www/CharityChatrixSystem"
   fi
 fi
 
@@ -392,4 +397,10 @@ echo "Restart  : pm2 restart ${APP_NAME}"
 echo
 echo "Point Nginx (already set) to: http://127.0.0.1:${APP_PORT}"
 echo "Keep websocket / socket.io proxy enabled."
+echo
+echo "PM2 list is per Linux user. To see ${APP_NAME}:"
+echo "  sudo -u ${SITE_USER} -H bash -lc 'pm2 list'"
+if [ "$(id -un)" != "$SITE_USER" ]; then
+  echo "Your current shell user is $(id -un), so plain 'pm2 list' can look empty."
+fi
 as_site 1 "pm2 status"
