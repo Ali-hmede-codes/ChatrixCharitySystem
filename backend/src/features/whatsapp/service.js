@@ -1,3 +1,4 @@
+import "../../infrastructure/websocket.js";
 import QRCode from "qrcode";
 import { WaClient } from "zapo-js";
 import { delay, withTimeout } from "../../shared/delay.js";

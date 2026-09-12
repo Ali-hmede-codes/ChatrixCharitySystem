@@ -1,3 +1,4 @@
+import "./infrastructure/websocket.js";
 import { createApp } from "./app/create-app.js";
 import { listen } from "./app/listen.js";
 import { acquireLock } from "./app/lock.js";
