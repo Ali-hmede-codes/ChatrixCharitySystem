@@ -5,6 +5,7 @@
 #
 # Usage:
 #   sudo bash deploy.sh
+#     (asks for CloudPanel user, domain, app port, and firewall ports)
 #   sudo bash deploy.sh --user SITEUSER --domain example.com --port 4173 --open 80,443
 #
 # If you uploaded this file from Windows and it fails with $'\r':
@@ -50,21 +51,30 @@ Usage: sudo bash deploy.sh [options]
   --open PORTS       Firewall ports, e.g. 80,443 or 80 443 4173
   --node VER         Node version for nvm (default: 20, or .nvmrc)
   -h, --help         Show this help
+
+With no flags, the script asks for user, domain, and ports.
 EOF
 }
 
+PROVIDED_USER=0
+PROVIDED_DOMAIN=0
+PROVIDED_DIR=0
+PROVIDED_PORT=0
+PROVIDED_LOCK=0
+PROVIDED_OPEN=0
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --user) SITE_USER="${2:-}"; shift 2 ;;
-    --domain) DOMAIN="${2:-}"; shift 2 ;;
-    --dir) APP_DIR="${2:-}"; shift 2 ;;
+    --user) SITE_USER="${2:-}"; PROVIDED_USER=1; shift 2 ;;
+    --domain) DOMAIN="${2:-}"; PROVIDED_DOMAIN=1; shift 2 ;;
+    --dir) APP_DIR="${2:-}"; PROVIDED_DIR=1; shift 2 ;;
     --repo) REPO_URL="${2:-}"; shift 2 ;;
     --branch) BRANCH="${2:-}"; shift 2 ;;
     --name) APP_NAME="${2:-}"; shift 2 ;;
-    --port) APP_PORT="${2:-}"; shift 2 ;;
-    --lock) LOCK_PORT="${2:-}"; shift 2 ;;
+    --port) APP_PORT="${2:-}"; PROVIDED_PORT=1; shift 2 ;;
+    --lock) LOCK_PORT="${2:-}"; PROVIDED_LOCK=1; shift 2 ;;
     --host) HOST="${2:-}"; shift 2 ;;
-    --open) FIREWALL_PORTS="${2:-}"; shift 2 ;;
+    --open) FIREWALL_PORTS="${2:-}"; PROVIDED_OPEN=1; shift 2 ;;
     --node) NODE_VERSION="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
@@ -85,6 +95,42 @@ valid_port() {
     ''|*[!0-9]*) return 1 ;;
   esac
   [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+guess_user() {
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    printf '%s' "$SUDO_USER"
+  else
+    printf '%s' "$(id -un)"
+  fi
+}
+
+ask_var() {
+  local varname="$1" provided="$2" label="$3" default="$4"
+  local current reply=""
+  eval "current=\"\${$varname:-}\""
+  [ -z "$current" ] && current="$default"
+
+  if [ "$provided" = 1 ]; then
+    return 0
+  fi
+
+  if [ ! -t 0 ]; then
+    printf -v "$varname" '%s' "$current"
+    return 0
+  fi
+
+  if [ -n "$current" ]; then
+    read -r -p "$label [$current]: " reply || true
+  else
+    read -r -p "$label: " reply || true
+  fi
+
+  if [ -n "$reply" ]; then
+    printf -v "$varname" '%s' "$reply"
+  else
+    printf -v "$varname" '%s' "$current"
+  fi
 }
 
 # Run as the site user. $1 = 1 to load nvm first, $2 = command.
@@ -115,22 +161,25 @@ ${cmd}
 }
 
 # =============================================================================
-# Resolve paths and user
+# Ask + resolve paths and user
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-if [ -z "$SITE_USER" ]; then
-  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-    SITE_USER="$SUDO_USER"
-  else
-    SITE_USER="$(id -un)"
-  fi
-fi
+echo
+echo "Chatrix deploy — press Enter to keep the value in [brackets]"
+echo
 
-id "$SITE_USER" >/dev/null 2>&1 || die "User '$SITE_USER' does not exist. Set SITE_USER or --user"
+ask_var SITE_USER "$PROVIDED_USER" "CloudPanel site user" "$(guess_user)"
+[ -n "$SITE_USER" ] || die "Site user is required"
+id "$SITE_USER" >/dev/null 2>&1 || die "User '$SITE_USER' does not exist. Check Sites → the site user in CloudPanel."
+
+ask_var DOMAIN "$PROVIDED_DOMAIN" "Domain (folder under /home/$SITE_USER/htdocs)" ""
+ask_var APP_PORT "$PROVIDED_PORT" "App port for Nginx / CloudPanel Node.js site" "4173"
+ask_var LOCK_PORT "$PROVIDED_LOCK" "Internal lock port (not used in CloudPanel)" "4179"
+ask_var FIREWALL_PORTS "$PROVIDED_OPEN" "Firewall ports to allow" "80,443"
 
 if [ -z "$APP_DIR" ]; then
-  if [ -f "$SCRIPT_DIR/backend/package.json" ]; then
+  if [ "$PROVIDED_DIR" = 0 ] && [ -f "$SCRIPT_DIR/backend/package.json" ]; then
     APP_DIR="$SCRIPT_DIR"
   elif [ -n "$DOMAIN" ]; then
     APP_DIR="/home/${SITE_USER}/htdocs/${DOMAIN}"
@@ -152,6 +201,7 @@ for p in $OPEN_LIST; do
   valid_port "$p" || die "Invalid firewall port: $p"
 done
 
+echo
 echo "Site user : $SITE_USER"
 echo "App dir   : $APP_DIR"
 echo "Repo      : $REPO_URL ($BRANCH)"
@@ -159,6 +209,19 @@ echo "PM2 name  : $APP_NAME"
 echo "Bind      : ${HOST}:${APP_PORT}  lock=${LOCK_PORT}"
 echo "Node/nvm  : nvm ${NVM_VERSION} + Node ${NODE_VERSION}"
 echo "Firewall  : ${OPEN_LIST:-<none>}"
+echo
+echo "CloudPanel Node.js / Nginx proxy port must be: $APP_PORT"
+echo "Public site stays on 80 and 443. Do not put 80 or 443 as the app port."
+echo
+
+if [ -t 0 ]; then
+  confirm=""
+  read -r -p "Continue? [Y/n]: " confirm || true
+  case "$confirm" in
+    ""|Y|y|yes|YES) ;;
+    *) die "Cancelled" ;;
+  esac
+fi
 
 # =============================================================================
 # System packages needed to clone, compile better-sqlite3, and fetch nvm
