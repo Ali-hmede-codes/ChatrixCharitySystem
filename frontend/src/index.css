@@ -428,6 +428,11 @@ svg {
   color: #78350f;
 }
 
+.sidebar-nav-badge.badge-danger {
+  background: #ef4444;
+  color: #ffffff;
+}
+
 /* Sidebar Footer & Live status */
 .sidebar-footer {
   padding: 10px;
@@ -4232,6 +4237,118 @@ svg {
   margin: 12px 0 0;
 }
 
+/* ==========================================================================
+   Aid Inventory screen
+   ========================================================================== */
+.inventory-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  width: 100%;
+  min-width: 0;
+}
+
+.inventory-status-card {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 28px 22px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  min-width: 0;
+}
+.inventory-status-card.is-ok {
+  border-color: #a7f3d0;
+  background: linear-gradient(180deg, #ecfdf5 0%, #ffffff 60%);
+}
+.inventory-status-card.is-low {
+  border-color: #fde68a;
+  background: linear-gradient(180deg, #fffbeb 0%, #ffffff 60%);
+}
+.inventory-status-card.is-blocked {
+  border-color: #fecaca;
+  background: linear-gradient(180deg, #fef2f2 0%, #ffffff 60%);
+}
+
+.inventory-status-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--slate-100);
+  color: var(--slate-600);
+}
+.is-blocked .inventory-status-icon { background: #fee2e2; color: #b91c1c; }
+.is-low .inventory-status-icon { background: #fef3c7; color: #b45309; }
+.is-ok .inventory-status-icon { background: #d1fae5; color: #047857; }
+
+.inventory-status-num {
+  font-size: 56px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--slate-900);
+}
+.inventory-status-label {
+  font-size: 13px;
+  color: var(--slate-500);
+  font-weight: 600;
+}
+
+.inventory-status-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  margin-top: 4px;
+}
+.inventory-status-flag.flag-ok { background: #d1fae5; color: #047857; }
+.inventory-status-flag.flag-warn { background: #fef3c7; color: #b45309; }
+.inventory-status-flag.flag-danger { background: #fee2e2; color: #b91c1c; }
+
+.inventory-form-card {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.inventory-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.inventory-step-input {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+}
+.inventory-step-btn {
+  min-width: 48px;
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  .inventory-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Close button for the mobile bottom sheet (hidden on desktop) */
 .pickup-sheet-close {
   display: none;
@@ -4329,6 +4446,21 @@ svg {
 .pickup-accept-btn {
   height: 42px !important;
   font-size: 14px !important;
+}
+
+.pickup-inventory-blocked {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-align: center;
+  justify-content: center;
 }
 
 .pickup-confirm-empty {

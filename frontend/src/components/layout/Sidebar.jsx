@@ -30,6 +30,7 @@ export function Sidebar() {
     sendJob,
     setNavOpen,
     campaigns = [],
+    inventory,
   } = useApp();
 
   const todayWaiting = campaigns.reduce((sum, c) => {
@@ -46,6 +47,14 @@ export function Sidebar() {
   const isSendingsActive = ["excel", "list", "send", "sending"].includes(currentStep);
 
   const managementItems = [
+    {
+      id: "inventory",
+      label: "Aid Inventory",
+      icon: <IconTicket className="w-4 h-4" />,
+      badge: inventory.count > 0 ? String(inventory.count) : "0",
+      badgeColor: inventory.count <= 0 ? "badge-danger" : inventory.count < 20 ? "badge-warn" : "badge-success",
+      disabled: false,
+    },
     {
       id: "settings",
       label: "Settings & SMS",

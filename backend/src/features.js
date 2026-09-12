@@ -14,6 +14,7 @@
 import { brandFeature } from "./features/brand/index.js";
 import { campaignsFeature } from "./features/campaigns/index.js";
 import { contactsFeature } from "./features/contacts/index.js";
+import { inventoryFeature } from "./features/inventory/index.js";
 import { messageTemplateFeature } from "./features/message-template/index.js";
 import { printerFeature } from "./features/printer/index.js";
 import { sendFeature } from "./features/send/index.js";
@@ -29,4 +30,5 @@ export const enabledFeatures = [
   whatsappFeature,
   contactsFeature,
   sendFeature,
+  inventoryFeature,
 ];

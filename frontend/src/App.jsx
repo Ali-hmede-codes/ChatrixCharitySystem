@@ -9,6 +9,7 @@ import { SettingsScreen } from "./components/screens/SettingsScreen.jsx";
 import { SendingMessagesScreen } from "./components/screens/SendingMessagesScreen.jsx";
 import { PickupScreen } from "./components/screens/PickupScreen.jsx";
 import { CampaignsScreen } from "./components/screens/CampaignsScreen.jsx";
+import { InventoryScreen } from "./components/screens/InventoryScreen.jsx";
 
 export function App() {
   const { currentStep, toast, navOpen } = useApp();
@@ -42,6 +43,7 @@ export function App() {
           {isWorkflow && <SendingMessagesScreen />}
           {currentStep === "pickup" && <PickupScreen />}
           {currentStep === "campaigns" && <CampaignsScreen />}
+          {currentStep === "inventory" && <InventoryScreen />}
           {currentStep === "settings" && <SettingsScreen />}
         </main>
       </div>

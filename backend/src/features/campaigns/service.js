@@ -1036,6 +1036,18 @@ export function createCampaignService(ctx) {
     };
   }
 
+  // Whether this person has already collected aid (used by the pickup
+  // handler to decide whether a collect is a reprint — reprints must not
+  // consume inventory stock, and must not be blocked when stock is 0).
+  function isPickupTaken(campaignId, phone, personName) {
+    const campaign = campaigns.find((c) => c.id === String(campaignId));
+    if (!campaign) return false;
+    const target = findRecipient(campaign, phone);
+    if (!target) return false;
+    const pickup = findPickup(target, personName);
+    return Boolean(pickup && pickup.takenAt);
+  }
+
   function markTaken(campaignId, phone, personName) {
     const campaign = campaigns.find((c) => c.id === String(campaignId));
     if (!campaign) return { ok: false, error: "Campaign not found." };
@@ -1148,5 +1160,6 @@ export function createCampaignService(ctx) {
     markTaken,
     reprintTaken,
     undoTaken,
+    isPickupTaken,
   };
 }

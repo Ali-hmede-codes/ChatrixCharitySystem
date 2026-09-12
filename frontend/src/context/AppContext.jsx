@@ -70,6 +70,10 @@ export function AppProvider({ children }) {
   // True while a pickup search is in flight. Drives the skeleton loader on
   // the Pickup screen so a slow connection shows shimmer rows, not a freeze.
   const [pickupLoading, setPickupLoading] = useState(false);
+  // Aid inventory at the pickup desk. Decrements -1 on each collection, blocks
+  // collecting at 0, and warns when under 20.
+  const [inventory, setInventory] = useState({ count: 0, label: "Aid portions", updatedAt: null });
+  const inventoryRef = useRef(inventory);
   const [pickupResults, setPickupResults] = useState({
     query: "",
     scope: "today",
@@ -113,6 +117,11 @@ export function AppProvider({ children }) {
     printerSettingsRef.current = printerSettings;
   }, [printerSettings]);
 
+  useEffect(() => {
+    inventoryRef.current = inventory;
+  }, [inventory]);
+
+
   // Network / Wifi offline listener
   useEffect(() => {
     function handleOnline() {
@@ -152,6 +161,7 @@ export function AppProvider({ children }) {
       socket.emit("campaigns:list");
       socket.emit("send:sync");
       socket.emit("printer:get");
+      socket.emit("inventory:get");
       if (hadConnectionRef.current) {
         showToast("Reconnected to Chatrix. Campaigns and send status refreshed.", "success");
       }
@@ -541,6 +551,9 @@ export function AppProvider({ children }) {
     socket.on("pickup:done", (event) => {
       pickupBusyRef.current = false;
       setPickupBusy(false);
+      if (event?.inventory) {
+        setInventory(event.inventory);
+      }
       if (!event?.ok) {
         showToast(event?.error || "Could not update pickup.", "error");
         return;
@@ -557,7 +570,14 @@ export function AppProvider({ children }) {
       }
       if (receipt && !event.alreadyTaken) {
         printReceipt(receipt, printerSettingsRef.current);
-        showToast(`Collected · ${receipt.aidId} · printing receipt`, "success");
+        const inv = event.inventory;
+        const low = inv && inv.count > 0 && inv.count < 20;
+        showToast(
+          low
+            ? `Collected · ${receipt.aidId} · printing receipt. ⚠ Only ${inv.count} ${inv.label || "aid"} left in inventory.`
+            : `Collected · ${receipt.aidId} · printing receipt`,
+          low ? "warning" : "success"
+        );
         return;
       }
       if (event.alreadyTaken) {
@@ -565,6 +585,17 @@ export function AppProvider({ children }) {
         const id = event.receipt?.aidId ? ` (${event.receipt.aidId})` : "";
         showToast(`${who} already collected aid${id}. Reprint if the paper is missing.`, "warning");
       }
+    });
+
+    socket.on("inventory:state", (data) => {
+      if (!data) return;
+      setInventory({ count: Number(data.count) || 0, label: data.label || "Aid portions", updatedAt: data.updatedAt || null });
+    });
+
+    socket.on("inventory:saved", (data) => {
+      if (!data) return;
+      setInventory({ count: Number(data.count) || 0, label: data.label || "Aid portions", updatedAt: data.updatedAt || null });
+      showToast(`Inventory updated · ${data.count} ${data.label || "aid"} in stock.`, "success");
     });
 
     socket.on("printer:settings", (data) => {
@@ -780,6 +811,10 @@ export function AppProvider({ children }) {
     if (socketRef.current) socketRef.current.emit("printer:save", payload);
   }
 
+  function saveInventory(payload) {
+    if (socketRef.current) socketRef.current.emit("inventory:set", payload || {});
+  }
+
   function saveContactsToPhone(actionableContacts) {
     if (!socketRef.current || savingContacts) return;
     setSavingContacts(true);
@@ -822,6 +857,8 @@ export function AppProvider({ children }) {
     messageSettings,
     brand,
     printerSettings,
+    inventory,
+    saveInventory,
     savedContacts,
     savingContacts,
     checkingContacts,

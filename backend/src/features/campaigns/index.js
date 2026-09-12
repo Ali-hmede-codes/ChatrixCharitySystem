@@ -80,18 +80,50 @@ export const campaignsFeature = {
         socket.emit("pickup:export-data", result);
       });
 
-      socket.on("pickup:mark", (payload) => {
+      socket.on("pickup:mark", async (payload) => {
+        const inv = ctx.services.inventory;
+        // Reprints (already collected) must not consume stock and must not
+        // be blocked when stock is 0 — only a NEW collection is blocked.
+        const alreadyTaken = campaigns.isPickupTaken(payload?.campaignId, payload?.phone, payload?.personName);
+        if (!alreadyTaken && inv?.isBlocked?.()) {
+          socket.emit("pickup:done", {
+            ok: false,
+            error: "No aid left in inventory. Restock to continue collecting.",
+            inventory: inv.publicState(),
+          });
+          return;
+        }
         const result = campaigns.markTaken(payload?.campaignId, payload?.phone, payload?.personName);
+        if (!result.ok) {
+          if (inv) result.inventory = inv.publicState();
+          socket.emit("pickup:done", result);
+          return;
+        }
+        // Decrement stock only for a genuine new collection.
+        if (!result.alreadyTaken && inv) {
+          result.inventory = await inv.decrement();
+        } else if (inv) {
+          result.inventory = inv.publicState();
+        }
         socket.emit("pickup:done", result);
       });
 
       socket.on("pickup:reprint", (payload) => {
         const result = campaigns.reprintTaken(payload?.campaignId, payload?.phone, payload?.personName);
+        const inv = ctx.services.inventory;
+        if (inv) result.inventory = inv.publicState();
         socket.emit("pickup:done", result);
       });
 
-      socket.on("pickup:undo", (payload) => {
+      socket.on("pickup:undo", async (payload) => {
         const result = campaigns.undoTaken(payload?.campaignId, payload?.phone, payload?.personName);
+        const inv = ctx.services.inventory;
+        // Undoing a collection returns the aid to stock (+1).
+        if (result.ok && inv) {
+          result.inventory = await inv.increment();
+        } else if (inv) {
+          result.inventory = inv.publicState();
+        }
         socket.emit("pickup:done", result);
       });
     });

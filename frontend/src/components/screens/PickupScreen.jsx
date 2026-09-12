@@ -17,6 +17,7 @@ import {
   IconX,
   IconUsers,
   IconSpreadsheet,
+  IconAlertCircle,
 } from "../common/Icons.jsx";
 import { Skeleton } from "../common/Skeleton.jsx";
 
@@ -50,9 +51,11 @@ export function PickupScreen() {
     printerSettings,
     campaigns = [],
     socketConnected,
+    inventory,
   } = useApp();
 
   const todayKey = campaignDayKey(Date.now());
+  const invCount = Number(inventory?.count) || 0;
   const [query, setQuery] = useState("");
   const [campaignDay, setCampaignDay] = useState("all");
   const [campaignId, setCampaignId] = useState("");
@@ -158,6 +161,11 @@ export function PickupScreen() {
         `${selected.name || "This person"} already collected aid${selected.takenAidId ? ` (${selected.takenAidId})` : ""}. Print the receipt again?`
       );
       if (ok) reprintPickup(selected.campaignId, selected.phone, selected.personName || selected.name);
+      return;
+    }
+    // Block new collections when the inventory is empty — the backend also
+    // blocks, but disabling here gives instant feedback before the round-trip.
+    if (invCount <= 0) {
       return;
     }
     markPickup(selected.campaignId, selected.phone, selected.personName || selected.name);
@@ -481,14 +489,28 @@ export function PickupScreen() {
                         </dd>
                       </div>
                     ) : null}
+                    <div>
+                      <dt>Aid in stock</dt>
+                      <dd>
+                        <strong className={invCount <= 0 ? "text-red-600" : invCount < 20 ? "text-amber-600" : "text-emerald-700"}>
+                          {invCount} {inventory?.label || "aid"}
+                        </strong>
+                      </dd>
+                    </div>
                   </dl>
                 </div>
 
                 <div className="pickup-confirm-actions">
+                  {!selected.takenAt && invCount <= 0 ? (
+                    <div className="pickup-inventory-blocked">
+                      <IconAlertCircle className="w-4 h-4" />
+                      <span>Out of stock. Restock in Inventory before collecting.</span>
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     className="btn-primary pickup-accept-btn"
-                    disabled={pickupBusy}
+                    disabled={pickupBusy || (!selected.takenAt && invCount <= 0)}
                     onClick={handleAccept}
                   >
                     <IconTicket className="w-4 h-4 mr-1.5" />
