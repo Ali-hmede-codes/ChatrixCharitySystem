@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useApp } from "../../context/AppContext.jsx";
 import { buildReceiptHtml, clampPaperWidth, printReceipt, sampleReceipt } from "../../services/receipt.js";
+import { describePhoneIssue, normalizePhone, toWhatsAppDigits } from "../../services/phone.js";
 import {
   IconCheck,
   IconUpload,
@@ -38,7 +39,32 @@ export function SettingsScreen() {
     setHeaderText(printerSettings.headerText || "");
   }, [printerSettings.paperWidthMm, printerSettings.headerText]);
 
+  useEffect(() => {
+    setSmsEnabled(Boolean(smsSettings.enabled));
+    setSmsFrom(smsSettings.from || "");
+  }, [smsSettings.enabled, smsSettings.from]);
+
+  const fromPreview = normalizePhone(smsFrom);
+  const fromIssue = describePhoneIssue(smsFrom);
+  const hasApiKey = Boolean(smsApiKey.trim() || smsSettings.hasApiKey);
+  const hasValidFrom = Boolean(toWhatsAppDigits(smsFrom));
+
   function handleSaveSms() {
+    if (smsEnabled) {
+      if (!hasApiKey) {
+        showToast("SMS is not configured. Paste the httpSMS API key first.", "error");
+        return;
+      }
+      if (!hasValidFrom) {
+        showToast(
+          fromIssue
+            ? `Sender number is not valid: ${fromIssue}. SMS cannot send until this is a +961 or +963 number.`
+            : "Enter a valid sender number in +961 (Lebanon) or +963 (Syria) format. SMS cannot send until this is set.",
+          "error"
+        );
+        return;
+      }
+    }
     saveSms({
       enabled: smsEnabled,
       apiKey: smsApiKey.trim(),
@@ -286,6 +312,18 @@ export function SettingsScreen() {
         {/* Tab 2: SMS Fallback */}
         {activeSettingsTab === "sms" && (
           <div className="settings-section max-w-2xl">
+            <div className={`sms-config-status ${smsSettings.ready ? "is-ready" : "is-blocked"}`}>
+              {smsSettings.ready ? (
+                <>
+                  <strong>SMS is configured.</strong> Campaigns may use 10-minute SMS fallback.
+                </>
+              ) : (
+                <>
+                  <strong>SMS is not configured.</strong> Campaigns cannot send SMS until you turn this on, paste the API key, and enter a valid +961 or +963 sender number.
+                </>
+              )}
+            </div>
+
             {/* Guide Info */}
             <div className="info-callout">
               <div className="info-callout-header">
@@ -342,12 +380,22 @@ export function SettingsScreen() {
               <input
                 id="sms-from-input"
                 type="tel"
-                className="form-input"
-                placeholder="+9613154131"
+                className={`form-input ${smsFrom.trim() && !hasValidFrom ? "is-invalid" : ""}`}
+                placeholder="+961 3 154 131 or +963 9XX XXX XXX"
                 value={smsFrom}
                 onChange={(e) => setSmsFrom(e.target.value)}
               />
-              <span className="form-hint">Must match the phone number with the SIM card in the httpSMS app.</span>
+              {smsFrom.trim() && hasValidFrom && (
+                <span className="form-hint form-hint-ok">Valid sender number: {fromPreview}</span>
+              )}
+              {smsFrom.trim() && !hasValidFrom && (
+                <span className="form-hint form-hint-error">
+                  {fromIssue}. Use Lebanon (+961) or Syria (+963) only.
+                </span>
+              )}
+              {!smsFrom.trim() && (
+                <span className="form-hint">Must match the phone number with the SIM card in the httpSMS app.</span>
+              )}
             </div>
 
             <div className="form-actions">

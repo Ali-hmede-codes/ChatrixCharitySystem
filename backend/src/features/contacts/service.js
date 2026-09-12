@@ -269,7 +269,7 @@ export function createContactsService(ctx) {
       lookups.forEach((item, digits) => {
         results.push({
           phone: `+${digits}`,
-          exists: item.exists === true,
+          exists: item.exists === true ? true : item.exists === false ? false : null,
           invalid: Boolean(item.invalid),
         });
       });

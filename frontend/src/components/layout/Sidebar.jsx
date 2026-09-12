@@ -58,8 +58,8 @@ export function Sidebar() {
       id: "settings",
       label: "Settings & SMS",
       icon: <IconSettings className="w-4 h-4" />,
-      badge: smsSettings.ready ? "SMS ON" : null,
-      badgeColor: smsSettings.ready ? "badge-success" : "",
+      badge: smsSettings.ready ? "SMS ON" : "SMS OFF",
+      badgeColor: smsSettings.ready ? "badge-success" : "badge-warn",
       disabled: false,
     },
   ];
@@ -217,10 +217,10 @@ export function Sidebar() {
                 setSettingsActiveTab("sms");
                 setCurrentStep("settings");
               }}
-              title="SMS fallback config"
+              title={smsSettings.ready ? "SMS fallback is configured" : "SMS is not configured — campaigns cannot send SMS"}
             >
               <IconMessage className="w-3 h-3" />
-              <span>{smsSettings.ready ? "SMS Fallback ON" : "SMS Fallback OFF"}</span>
+              <span>{smsSettings.ready ? "SMS configured" : "SMS not configured"}</span>
             </button>
 
             {isLinked ? (

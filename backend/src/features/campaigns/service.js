@@ -327,7 +327,7 @@ export function createCampaignService(ctx) {
       pausedAt: null,
       status: "running",
       pauseReason: null,
-      enableSms: Boolean(enableSms),
+      enableSms: Boolean(enableSms) && Boolean(ctx.services.sms?.ready?.()),
       message: String(message || "").trim(),
       aidCode: String(aidCode || "").trim().slice(0, 80),
       senderPhone: String(senderPhone || "").trim(),
@@ -335,7 +335,7 @@ export function createCampaignService(ctx) {
         message: String(sendOptions.message || message || "").trim(),
         useNameTemplate: Boolean(sendOptions.useNameTemplate),
         nameTemplate: String(sendOptions.nameTemplate || ""),
-        enableSms: Boolean(enableSms),
+        enableSms: Boolean(enableSms) && Boolean(ctx.services.sms?.ready?.()),
       },
       totalRecipients: recipients.length,
       stats: {
@@ -350,25 +350,29 @@ export function createCampaignService(ctx) {
         taken: 0,
         people: 0,
       },
-      recipients: recipients.map((r) => {
-        const names = namesFromRecipient(r);
-        const row = {
-          phone: plusPhone(r.phone),
-          name: r.name || names.join(" + ") || "",
-          names,
-          code: String(r.code || "").trim(),
-          state: "queued",
-          channel: "none",
-          detail: "Queued for sending",
-          updatedAt: Date.now(),
-          takenAt: null,
-          takenAidId: "",
-          printCount: 0,
-          pickups: [],
-        };
-        ensurePickups(row);
-        return row;
-      }),
+      recipients: recipients
+        .map((r) => {
+          const phone = plusPhone(r.phone);
+          if (!phone) return null;
+          const names = namesFromRecipient(r);
+          const row = {
+            phone,
+            name: r.name || names.join(" + ") || "",
+            names,
+            code: String(r.code || "").trim(),
+            state: "queued",
+            channel: "none",
+            detail: "Queued for sending",
+            updatedAt: Date.now(),
+            takenAt: null,
+            takenAidId: "",
+            printCount: 0,
+            pickups: [],
+          };
+          ensurePickups(row);
+          return row;
+        })
+        .filter(Boolean),
     };
 
     recountStats(newCampaign);
@@ -384,6 +388,7 @@ export function createCampaignService(ctx) {
     if (!campaign) return;
 
     const formattedPhone = plusPhone(phone);
+    if (!formattedPhone) return;
     let target = campaign.recipients.find((r) => r.phone === formattedPhone);
     if (!target) {
       target = {

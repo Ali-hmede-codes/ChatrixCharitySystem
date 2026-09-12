@@ -375,6 +375,11 @@ svg {
   color: #ffffff;
 }
 
+.sidebar-nav-badge.badge-warn {
+  background: #f59e0b;
+  color: #78350f;
+}
+
 /* Sidebar Footer & Live status */
 .sidebar-footer {
   padding: 10px;
@@ -492,6 +497,12 @@ svg {
   background: rgba(16, 185, 129, 0.25);
   border-color: rgba(16, 185, 129, 0.4);
   color: #a7f3d0;
+}
+
+.sidebar-mini-pill.pill-sms-off {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(245, 158, 11, 0.45);
+  color: #fde68a;
 }
 
 .sidebar-disconnect-btn {
@@ -970,6 +981,15 @@ svg {
   margin-top: 4px;
 }
 
+.form-hint-ok {
+  color: #15803d;
+}
+
+.form-hint-error {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
 .form-input {
   width: 100%;
   height: 32px;
@@ -986,6 +1006,16 @@ svg {
   outline: none;
   border-color: var(--emerald-500);
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
+}
+
+.form-input.is-invalid {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.form-input.is-invalid:focus {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.15);
 }
 
 .form-textarea {
@@ -1316,6 +1346,24 @@ svg {
   background: var(--slate-100);
   padding: 2px 6px;
   border-radius: 4px;
+}
+
+.phone-mono-tag.is-invalid {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.phone-invalid-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.phone-invalid-reason {
+  font-size: 10px;
+  font-weight: 600;
+  color: #b91c1c;
 }
 
 .status-tags-row {
@@ -2258,6 +2306,14 @@ svg {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
+}
+
+.col-option-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .col-option-name {
@@ -2782,6 +2838,11 @@ svg {
   border-color: var(--border-subtle);
 }
 
+.campaign-sms-card.sms-blocked {
+  background: #fff7ed;
+  border-color: #fdba74;
+}
+
 .sms-card-header {
   display: flex;
   align-items: flex-start;
@@ -2820,6 +2881,62 @@ svg {
   font-size: 11px;
   display: flex;
   align-items: center;
+}
+
+.sms-blocked-banner {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sms-blocked-banner strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.sms-settings-link {
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.sms-config-status {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.sms-config-status.is-ready {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #166534;
+}
+
+.sms-config-status.is-blocked {
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+}
+
+.excel-invalid-banner {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 /* Switch Control */
@@ -2870,6 +2987,17 @@ svg {
 
 .switch-control input:checked + .switch-slider:before {
   transform: translateX(18px);
+}
+
+.switch-control.is-disabled,
+.switch-control:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.switch-control input:disabled + .switch-slider {
+  cursor: not-allowed;
+  background-color: #e2e8f0;
 }
 
 /* Campaign History View */

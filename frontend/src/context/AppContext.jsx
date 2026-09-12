@@ -215,15 +215,20 @@ export function AppProvider({ children }) {
         const key = phoneKey(item.phone);
         if (key) {
           updates[key] = {
-            exists: item.exists === true,
+            exists: item.exists === true ? true : item.exists === false ? false : null,
             invalid: Boolean(item.invalid),
           };
         }
       });
       setWaCheckMap((prev) => ({ ...prev, ...updates }));
-      const onWa = results.filter((r) => r.exists && !r.invalid).length;
+      const onWa = results.filter((r) => r.exists === true && !r.invalid).length;
       const offWa = results.filter((r) => r.exists === false || r.invalid).length;
-      setContactProgressHint(`WhatsApp check: ${onWa} on WhatsApp · ${offWa} not on WhatsApp`);
+      const unknown = results.filter((r) => r.exists == null && !r.invalid).length;
+      setContactProgressHint(
+        `WhatsApp check: ${onWa} on WhatsApp · ${offWa} not on WhatsApp${
+          unknown ? ` · ${unknown} could not verify` : ""
+        }`
+      );
       if (event?.error) showToast(event.error, "error");
     });
 
@@ -336,6 +341,10 @@ export function AppProvider({ children }) {
         stepText: msg,
       }));
       showToast(msg, "error");
+    });
+
+    socket.on("send:notice", (msg) => {
+      if (msg) showToast(msg, "warning");
     });
 
     // SMS & Message & Brand settings
@@ -572,11 +581,18 @@ export function AppProvider({ children }) {
       remaining: recipientsList.length,
       autoResume: true,
     });
+    const allowSms = Boolean(options.enableSms) && Boolean(smsSettings.ready);
+    if (options.enableSms && !smsSettings.ready) {
+      showToast(
+        "SMS is not configured. This campaign will send WhatsApp only. Open Settings & SMS to enable fallback.",
+        "warning"
+      );
+    }
     socketRef.current.emit("send:start", {
       recipients: recipientsList,
       message: text,
       campaignName: options.campaignName,
-      enableSms: options.enableSms,
+      enableSms: allowSms,
       useNameTemplate: Boolean(options.useNameTemplate),
       nameTemplate: options.nameTemplate,
     });

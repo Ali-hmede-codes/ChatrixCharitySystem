@@ -263,16 +263,27 @@ export function PeopleScreen() {
                               Saved on Phone
                             </span>
                           )}
-                          {check && check.exists && (
+                          {check?.exists === true && !check.invalid && (
                             <span className="chip-badge chip-emerald">
                               <span className="dot-indicator bg-emerald-500" />
                               WhatsApp Active
                             </span>
                           )}
-                          {check && (!check.exists || check.invalid) && (
+                          {check?.invalid && (
+                            <span className="chip-badge chip-danger">
+                              <span className="dot-indicator bg-red-500" />
+                              Invalid number
+                            </span>
+                          )}
+                          {check && check.exists === false && !check.invalid && (
                             <span className="chip-badge chip-danger">
                               <span className="dot-indicator bg-red-500" />
                               Not on WhatsApp
+                            </span>
+                          )}
+                          {check && check.exists == null && !check.invalid && (
+                            <span className="chip-badge chip-warning">
+                              Could not verify
                             </span>
                           )}
                           {!saved?.savedOnPrimary && !check && (

@@ -7,7 +7,7 @@ import {
   guessCodeCol,
   getColumnStats,
 } from "../../services/excel.js";
-import { normalizePhone, phoneKey } from "../../services/phone.js";
+import { describePhoneIssue, normalizePhone, phoneKey } from "../../services/phone.js";
 import { addPersonName, sanitizeAidCode } from "../../services/names.js";
 import { MAX_PEOPLE } from "../../constants/config.js";
 import {
@@ -76,7 +76,7 @@ export function ExcelScreen() {
       const rawPhone = row[phoneIdx];
       const phone = normalizePhone(rawPhone);
       if (!phone) {
-        if (String(rawPhone || "").trim()) skippedInvalid += 1;
+        if (String(rawPhone ?? "").trim()) skippedInvalid += 1;
         return;
       }
 
@@ -110,6 +110,16 @@ export function ExcelScreen() {
       resultList.push(person);
     });
 
+    if (!resultList.length) {
+      showToast(
+        skippedInvalid
+          ? `${skippedInvalid} number${skippedInvalid === 1 ? "" : "s"} in that column are not valid Lebanon (+961) or Syria (+963) phones. Fix the highlighted cells, or pick another column.`
+          : "No valid Lebanon (+961) or Syria (+963) phone numbers in the selected column.",
+        "error"
+      );
+      return;
+    }
+
     const withCodes = resultList.filter((p) => p.code).length;
     const useNameCol = nameIdx >= 0 && nameIdx !== phoneIdx;
     const useCodeCol = codeIdx >= 0 && codeIdx !== phoneIdx && codeIdx !== nameIdx;
@@ -117,12 +127,13 @@ export function ExcelScreen() {
     setImportedFileName(sheetData.fileName);
     setListColumns({ hasNames: useNameCol, hasCodes: useCodeCol });
     const extras = [];
+    if (skippedInvalid) extras.push(`${skippedInvalid} invalid skipped`);
     if (mergedDupes) extras.push(`${mergedDupes} shared numbers combined`);
     if (useNameCol) extras.push("names included");
     else extras.push("no name column");
     if (useCodeCol) extras.push(`${withCodes} pickup codes`);
     else extras.push("no pickup-code column");
-    showToast(`Imported ${resultList.length} numbers · ${extras.join(" · ")}`, "success");
+    showToast(`Imported ${resultList.length} valid numbers · ${extras.join(" · ")}`, skippedInvalid ? "warning" : "success");
     setCurrentStep("list");
   }
 
@@ -145,6 +156,7 @@ export function ExcelScreen() {
               type="button"
               className="btn-primary"
               onClick={handleImportToList}
+              disabled={!phoneStats?.hits}
             >
               <IconUsers className="w-4 h-4 mr-1.5" />
               <span>Import to Beneficiaries List</span>
@@ -219,7 +231,7 @@ export function ExcelScreen() {
             <div className="config-column-card">
               <h3 className="card-section-title">1. Select Phone Number Column</h3>
               <p className="card-section-desc">
-                Choose the column containing beneficiary mobile numbers:
+                Choose the column containing beneficiary mobile numbers. Only Lebanon (+961) and Syria (+963) numbers are imported. Invalid cells stay red below.
               </p>
 
               <div className="col-options-list">
@@ -239,12 +251,20 @@ export function ExcelScreen() {
                     >
                       <div className="col-option-header">
                         <strong className="col-option-name">{header || `Col ${idx + 1}`}</strong>
-                        <span className={`chip-badge ${stats.hits > 0 ? "chip-success" : "chip-neutral"}`}>
-                          {stats.hits} valid
+                        <span className="col-option-chips">
+                          <span className={`chip-badge ${stats.hits > 0 ? "chip-success" : "chip-neutral"}`}>
+                            {stats.hits} valid
+                          </span>
+                          {stats.invalid > 0 && (
+                            <span className="chip-badge chip-danger">{stats.invalid} invalid</span>
+                          )}
                         </span>
                       </div>
                       <span className="col-option-samples">
-                        {stats.samples.join(" · ") || "No valid numbers found"}
+                        {stats.samples.join(" · ") || "No valid +961 / +963 numbers found"}
+                        {stats.invalid > 0 && stats.invalidSamples.length
+                          ? ` · skipped: ${stats.invalidSamples.join(" · ")}`
+                          : ""}
                       </span>
                     </button>
                   );
@@ -347,9 +367,22 @@ export function ExcelScreen() {
                             }
                           >
                             {cIdx === selectedPhoneCol ? (
-                              <code className="phone-mono-tag">
-                                {normalizePhone(row[cIdx]) || String(row[cIdx] || "—")}
-                              </code>
+                              (() => {
+                                const formatted = normalizePhone(row[cIdx]);
+                                const raw = String(row[cIdx] ?? "").trim();
+                                if (formatted) {
+                                  return <code className="phone-mono-tag">{formatted}</code>;
+                                }
+                                if (!raw) return "—";
+                                return (
+                                  <span className="phone-invalid-wrap">
+                                    <code className="phone-mono-tag is-invalid">{raw}</code>
+                                    <span className="phone-invalid-reason">
+                                      Invalid · {describePhoneIssue(raw)}
+                                    </span>
+                                  </span>
+                                );
+                              })()
                             ) : (
                               String(row[cIdx] || "—")
                             )}
@@ -361,15 +394,25 @@ export function ExcelScreen() {
                 </table>
               </div>
 
+              {phoneStats?.invalid > 0 && (
+                <div className="excel-invalid-banner" role="status">
+                  <strong>{phoneStats.invalid} number{phoneStats.invalid === 1 ? "" : "s"} will not import.</strong>
+                  {" "}
+                  Only Lebanon (+961) and Syria (+963) phones are valid. Fix the red cells or pick another column.
+                </div>
+              )}
+
               <div className="preview-action-footer">
                 <button
                   type="button"
                   className="btn-primary w-full"
                   onClick={handleImportToList}
+                  disabled={!phoneStats?.hits}
                 >
                   <IconUsers className="w-4 h-4 mr-1.5" />
                   <span>
-                    Import {phoneStats?.hits || 0} Beneficiaries to List
+                    Import {phoneStats?.hits || 0} valid beneficiar{phoneStats?.hits === 1 ? "y" : "ies"}
+                    {phoneStats?.invalid ? ` · skip ${phoneStats.invalid} invalid` : ""}
                   </span>
                 </button>
               </div>

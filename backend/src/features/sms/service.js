@@ -88,11 +88,14 @@ export function createSmsService(ctx) {
     const nextKey = String(payload?.apiKey || "").trim();
     const fromDigits = toWhatsAppDigits(payload?.from || settings.from);
     if (enabled && !nextKey && !settings.apiKey) {
-      socket.emit("sms:error", "Paste the httpSMS API key first.");
+      socket.emit("sms:error", "SMS is not configured. Paste the httpSMS API key first.");
       return;
     }
     if (enabled && !fromDigits) {
-      socket.emit("sms:error", "Enter the Android From number in +961 or +963 format.");
+      socket.emit(
+        "sms:error",
+        "SMS is not configured. Enter a valid sender number in Lebanon (+961) or Syria (+963) format, for example +961 3 154 131."
+      );
       return;
     }
     settings = {

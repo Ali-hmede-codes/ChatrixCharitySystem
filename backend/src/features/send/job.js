@@ -569,8 +569,15 @@ export function createSendService(ctx) {
       return;
     }
 
-    const enableSms =
+    const requestedSms =
       payload?.enableSms !== undefined ? Boolean(payload?.enableSms) : Boolean(ctx.services.sms?.ready?.());
+    const enableSms = requestedSms && Boolean(ctx.services.sms?.ready?.());
+    if (requestedSms && !enableSms) {
+      socket.emit(
+        "send:notice",
+        "SMS is not configured. This campaign will send WhatsApp only. Open Settings & SMS to add the httpSMS API key and sender number."
+      );
+    }
     const campaignName = String(payload?.campaignName || payload?.name || "").trim();
     const senderPhone = ctx.services.whatsapp?.getStatus?.()?.phone || "";
 
@@ -640,8 +647,17 @@ export function createSendService(ctx) {
     const body = String(campaign.sendOptions?.message || campaign.message || "").trim();
     const useNameTemplate = Boolean(campaign.sendOptions?.useNameTemplate);
     const nameTemplate = String(campaign.sendOptions?.nameTemplate || "").trim();
-    const enableSms =
-      campaign.sendOptions?.enableSms !== undefined ? Boolean(campaign.sendOptions.enableSms) : Boolean(campaign.enableSms);
+    const requestedSms =
+      campaign.sendOptions?.enableSms !== undefined
+        ? Boolean(campaign.sendOptions.enableSms)
+        : Boolean(campaign.enableSms);
+    const enableSms = requestedSms && Boolean(ctx.services.sms?.ready?.());
+    if (requestedSms && !enableSms) {
+      socket.emit(
+        "send:notice",
+        "SMS is not configured, so this resume will send WhatsApp only. Configure Settings & SMS before SMS fallback can run."
+      );
+    }
     const extrasFor = (recipient) => ({
       code: recipient?.code,
       useNameTemplate,

@@ -176,7 +176,10 @@ export function createDeliveryTracker(ctx) {
     const batch = {
       id: options.id || `b-${Date.now()}`,
       campaignId: options.campaignId || null,
-      enableSms: options.enableSms !== undefined ? Boolean(options.enableSms) : Boolean(ctx.services.sms?.ready?.()),
+      enableSms:
+        options.enableSms !== undefined
+          ? Boolean(options.enableSms) && Boolean(ctx.services.sms?.ready?.())
+          : Boolean(ctx.services.sms?.ready?.()),
       message,
       items: [],
       pending: 0,

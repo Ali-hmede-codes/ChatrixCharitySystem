@@ -60,6 +60,7 @@ export function SendScreen() {
     pickupBusy,
     markPickup,
     reprintPickup,
+    setSettingsActiveTab,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState("compose"); // "compose" | "history"
@@ -76,6 +77,7 @@ export function SendScreen() {
   }, []);
 
   const [campaignName, setCampaignName] = useState(defaultCampaignName);
+  const smsReady = Boolean(smsSettings.ready);
   const [enableSms, setEnableSms] = useState(Boolean(smsSettings.ready));
   const [messageText, setMessageText] = useState("");
   const [includeGreeting, setIncludeGreeting] = useState(() => Boolean(listColumns.hasNames));
@@ -110,6 +112,10 @@ export function SendScreen() {
       end: Math.min(end ?? start ?? max, max),
     };
   }
+
+  useEffect(() => {
+    if (!smsReady) setEnableSms(false);
+  }, [smsReady]);
 
   useEffect(() => {
     const textarea = messageTextareaRef.current;
@@ -281,7 +287,7 @@ export function SendScreen() {
 
     startSend(actionable, body, {
       campaignName: title,
-      enableSms: Boolean(enableSms),
+      enableSms: Boolean(enableSms && smsReady),
       useNameTemplate: useGreeting,
       nameTemplate: DEFAULT_NAME_TEMPLATE,
     });
@@ -292,7 +298,7 @@ export function SendScreen() {
     setConstrainedMessage(next);
     setActiveTemplateId("");
     setCampaignName(`متابعة: ${c.name}`);
-    setEnableSms(Boolean(c.enableSms));
+    setEnableSms(Boolean(c.enableSms) && smsReady);
     setActiveTab("compose");
     if ((c.message && next !== String(c.message || "").trim()) || (!hasCodes && c.aidCode)) {
       showToast("Loaded the message. Names/codes that this list cannot send were removed.", "info");
@@ -621,28 +627,35 @@ export function SendScreen() {
                   <div className="compose-step-label">Step 3 · Delivery</div>
                   <div
                     className={`campaign-sms-card ${
-                      enableSms ? "sms-active" : "sms-inactive"
+                      !smsReady ? "sms-blocked" : enableSms ? "sms-active" : "sms-inactive"
                     }`}
                   >
                     <div className="sms-card-header">
                       <div className="sms-card-left">
-                        <label className="switch-control">
+                        <label className={`switch-control ${!smsReady || sendingBusy ? "is-disabled" : ""}`}>
                           <input
                             type="checkbox"
-                            checked={enableSms}
-                            onChange={(e) => setEnableSms(e.target.checked)}
-                            disabled={sendingBusy}
+                            checked={Boolean(enableSms && smsReady)}
+                            onChange={(e) => {
+                              if (!smsReady) return;
+                              setEnableSms(e.target.checked);
+                            }}
+                            disabled={sendingBusy || !smsReady}
                           />
                           <span className="switch-slider" />
                         </label>
                         <div>
                           <strong className="sms-card-title">
-                            {enableSms
+                            {!smsReady
+                              ? "SMS is not configured — WhatsApp only"
+                              : enableSms
                               ? "Send SMS in this campaign (Automatic 10-Min Fallback)"
                               : "WhatsApp Only (SMS Fallback disabled for this campaign)"}
                           </strong>
                           <p className="sms-card-desc">
-                            {enableSms
+                            {!smsReady
+                              ? "You cannot send SMS until httpSMS is fully configured: turn it on, paste the API key, and enter a valid +961 or +963 sender number in Settings & SMS."
+                              : enableSms
                               ? "If a WhatsApp message isn't confirmed delivered within 10 minutes or the recipient is not on WhatsApp, httpSMS will automatically send via cellular SMS."
                               : "No cellular SMS will be sent for this campaign. Beneficiaries without WhatsApp or with delays will be skipped to save SMS credits."}
                           </p>
@@ -650,7 +663,9 @@ export function SendScreen() {
                       </div>
 
                       <div className="sms-card-badge">
-                        {enableSms ? (
+                        {!smsReady ? (
+                          <span className="chip-badge chip-danger">SMS not configured</span>
+                        ) : enableSms ? (
                           <span className="chip-badge chip-success">
                             <IconCheck className="w-3 h-3 mr-1" />
                             SMS Fallback Active
@@ -663,12 +678,22 @@ export function SendScreen() {
                       </div>
                     </div>
 
-                    {!smsSettings.ready && enableSms && (
-                      <div className="sms-warning-inline">
-                        <IconPhone className="w-3.5 h-3.5 mr-1" />
-                        <span>
-                          Note: Cellular SMS gateway is not configured yet. You can configure httpSMS credentials in <strong>Settings & SMS</strong>.
-                        </span>
+                    {!smsReady && (
+                      <div className="sms-blocked-banner">
+                        <IconPhone className="w-3.5 h-3.5" />
+                        <div>
+                          <strong>SMS sending is locked.</strong> This campaign cannot send cellular SMS until Settings & SMS is complete.
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-secondary sms-settings-link"
+                          onClick={() => {
+                            setSettingsActiveTab("sms");
+                            setCurrentStep("settings");
+                          }}
+                        >
+                          Configure SMS
+                        </button>
                       </div>
                     )}
                   </div>

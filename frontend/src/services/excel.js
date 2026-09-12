@@ -123,18 +123,27 @@ export function guessCodeCol(headers, phoneIndex, nameIndex) {
 
 export function getColumnStats(rows, index) {
   let hits = 0;
+  let invalid = 0;
   let lebanon = 0;
   let syria = 0;
   const samples = [];
+  const invalidSamples = [];
   for (const row of rows || []) {
-    const digits = toWhatsAppDigits(row[index]);
-    if (!digits) continue;
-    hits += 1;
-    if (digits.startsWith("963")) syria += 1;
-    else lebanon += 1;
-    if (samples.length < 2) samples.push(formatPhone(digits));
+    const raw = row[index];
+    const digits = toWhatsAppDigits(raw);
+    if (digits) {
+      hits += 1;
+      if (digits.startsWith("963")) syria += 1;
+      else lebanon += 1;
+      if (samples.length < 2) samples.push(formatPhone(digits));
+      continue;
+    }
+    if (String(raw ?? "").trim()) {
+      invalid += 1;
+      if (invalidSamples.length < 2) invalidSamples.push(String(raw).trim());
+    }
   }
-  return { hits, lebanon, syria, samples };
+  return { hits, invalid, lebanon, syria, samples, invalidSamples };
 }
 
 export async function parseSpreadsheet(file) {
