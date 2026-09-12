@@ -20,6 +20,25 @@ export function sqliteProviders() {
   };
 }
 
+// Cache domains (opt-in, default to memory). We persist `deviceList` to SQLite
+// so the recipient device list resolved during a send survives reconnects and
+// process restarts. Without this, recalling (revoking) a message sent in the
+// last 15 minutes can fail with "direct fanout dropping primary recipient
+// device without signal session": the in-memory device list is gone, the
+// on-demand usync re-query at recall time can fail, and zapo falls back to the
+// bare recipient jid which has no Signal session — so the revoke is dropped
+// and the message stays in the recipient's chat.
+export function sqliteCacheProviders() {
+  return {
+    deviceList: "sqlite",
+  };
+}
+
+// Keep the device list fresh for 30 minutes — longer than the recall window
+// (default 15 min) — so a recall never needs to re-query WhatsApp for devices
+// (that query is the flaky step that drops the revoke).
+const DEVICE_LIST_CACHE_TTL_MS = 30 * 60 * 1000;
+
 function bufferJsonReviver(_key, value) {
   if (value && value.type === "Buffer" && Array.isArray(value.data)) {
     return Buffer.from(value.data);
@@ -44,9 +63,14 @@ export async function createWhatsAppStore({ config, logger }) {
   await mkdir(config.AUTH_DIR, { recursive: true });
   const store = createStore({
     backends: {
-      sqlite: createSqliteStore({ path: config.SQLITE_PATH, driver: "auto" }),
+      sqlite: createSqliteStore({
+        path: config.SQLITE_PATH,
+        driver: "auto",
+        cacheTtlMs: { deviceListMs: DEVICE_LIST_CACHE_TTL_MS },
+      }),
     },
     providers: sqliteProviders(),
+    cacheProviders: sqliteCacheProviders(),
   });
   await migrateBaileysIfNeeded({ store, config, logger });
   return store;

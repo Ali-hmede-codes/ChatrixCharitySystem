@@ -950,6 +950,11 @@ export function createSendService(ctx) {
     let ok = 0;
     let fail = 0;
     let skipped = 0;
+    // A recall can fail transiently (the recipient device-list query times
+    // out, or a brief network blip drops the revoke). Retry once after a short
+    // gap — a second attempt often succeeds once the device fanout is cached.
+    const RECALL_ATTEMPTS = 2;
+    const RECALL_RETRY_GAP_MS = 2_500;
     for (const it of items) {
       if (!ctx.services.whatsapp?.isOpen?.()) {
         ctx.io.emit("send:notice", {
@@ -981,29 +986,45 @@ export function createSendService(ctx) {
           skipped += 1;
           continue;
         }
-        try {
-          await withTimeout(
-            client.message.send(jid, {
-              type: "revoke",
-              target: { remoteJid: jid, id: messageId, fromMe: true },
-            }),
-            20_000,
-            "Recall timed out"
-          );
+        let succeeded = false;
+        let lastError = null;
+        for (let attempt = 1; attempt <= RECALL_ATTEMPTS && !succeeded; attempt += 1) {
+          if (!ctx.services.whatsapp?.isOpen?.()) break;
+          try {
+            await withTimeout(
+              client.message.send(jid, {
+                type: "revoke",
+                target: { remoteJid: jid, id: messageId, fromMe: true },
+              }),
+              20_000,
+              "Recall timed out"
+            );
+            succeeded = true;
+          } catch (error) {
+            lastError = error;
+            // Only retry if WhatsApp is still connected; otherwise the outer
+            // loop will report the disconnect and stop.
+            if (attempt < RECALL_ATTEMPTS && ctx.services.whatsapp?.isOpen?.()) {
+              await waitGap(RECALL_RETRY_GAP_MS, () => false);
+            }
+          }
+        }
+        if (succeeded) {
           ok += 1;
-        } catch (error) {
+        } else {
           fail += 1;
-          ctx.logger.warn({ err: error, phone: it.phone, messageId }, "recall failed");
+          ctx.logger.warn({ err: lastError, phone: it.phone, messageId }, "recall failed");
         }
         // Pace the recalls so we don't trip WhatsApp's rate limiter.
         await waitGap(1_500, () => false);
       }
     }
     const level = fail === 0 ? "success" : ok === 0 ? "warn" : "info";
-    ctx.io.emit("send:notice", {
-      level,
-      message: `Recall for "${campaignName}" done: ${ok} deleted, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}.`,
-    });
+    let message = `Recall for "${campaignName}" done: ${ok} deleted, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}.`;
+    if (ok === 0 && fail > 0) {
+      message += ` The campaign was removed, but its messages could not be deleted from recipients' chats (WhatsApp refused the revoke). They may still see the message.`;
+    }
+    ctx.io.emit("send:notice", { level, message });
   }
 
   return {
