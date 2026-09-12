@@ -40,6 +40,21 @@ export function PickupScreen() {
   const [status, setStatus] = useState("pending");
   const [selected, setSelected] = useState(null);
 
+  // On mobile the confirm card is a bottom sheet that should only open when
+  // the user taps a name — so we skip the "auto-select first row" behaviour on
+  // small screens. On desktop the right pane always shows a person, so we
+  // auto-select the first row there.
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 1025px)").matches
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(min-width: 1025px)");
+    const handler = (e) => setIsDesktop(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
   const searchPayload = useMemo(
     () => ({
       query,
@@ -76,10 +91,11 @@ export function PickupScreen() {
         if (fresh) return fresh;
         if (status === "taken" && current.takenAt) return current;
         if (status === "pending" && !current.takenAt) return current;
+        return isDesktop ? items[0] || null : null;
       }
-      return items[0] || null;
+      return isDesktop ? items[0] || null : null;
     });
-  }, [pickupResults.items, items, status]);
+  }, [pickupResults.items, items, status, isDesktop]);
 
   const campaignDates = useMemo(() => {
     const map = new Map();
@@ -168,6 +184,11 @@ export function PickupScreen() {
 
   return (
     <div className="page-view pickup-page">
+      <div
+        className={`pickup-sheet-backdrop ${selected ? "is-open" : ""}`}
+        onClick={() => setSelected(null)}
+        aria-hidden="true"
+      />
       <div className="page-header">
         <div>
           <h1 className="page-title">Aid Pickup Desk</h1>
@@ -379,9 +400,17 @@ export function PickupScreen() {
             )}
           </section>
 
-          <aside className="pickup-confirm-pane">
+          <aside className={`pickup-confirm-pane ${selected ? "is-open" : ""}`}>
             {selected ? (
               <>
+                <button
+                  type="button"
+                  className="pickup-sheet-close"
+                  onClick={() => setSelected(null)}
+                  aria-label="Close"
+                >
+                  <IconX className="w-5 h-5" />
+                </button>
                 <div className="pickup-confirm-card">
                   <div className="pickup-confirm-avatar" style={{ backgroundColor: getAvatarColor(selected.name || selected.phone) }}>
                     {personInitials(selected.name, selected.phone)}

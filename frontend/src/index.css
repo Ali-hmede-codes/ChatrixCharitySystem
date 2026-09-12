@@ -4001,9 +4001,14 @@ svg {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.85fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
   min-height: 0;
   flex: 1;
+  height: 100%;
+}
+
+.pickup-page .page-content-scroll {
+  overflow: hidden;
 }
 
 .pickup-search-pane,
@@ -4018,11 +4023,14 @@ svg {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .pickup-search-hero {
   padding: 14px 16px 10px;
   border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
 }
 
 .pickup-search-field {
@@ -4072,8 +4080,7 @@ svg {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 120px;
-  max-height: 560px;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -4156,6 +4163,16 @@ svg {
   margin: 12px 0 0;
 }
 
+/* Close button for the mobile bottom sheet (hidden on desktop) */
+.pickup-sheet-close {
+  display: none;
+}
+
+/* Backdrop for the mobile bottom sheet (hidden on desktop) */
+.pickup-sheet-backdrop {
+  display: none;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -4170,8 +4187,9 @@ svg {
 
 .pickup-confirm-pane {
   padding: 18px 16px;
-  position: sticky;
-  top: 8px;
+  overflow-y: auto;
+  min-height: 0;
+  height: 100%;
 }
 
 .pickup-confirm-card {
@@ -4306,8 +4324,20 @@ svg {
     grid-template-columns: 1fr;
   }
 
-  .pickup-confirm-pane {
-    position: static;
+  /* Mobile: the page scrolls naturally; the list is full-height (no inner scroll). */
+  .pickup-page .page-content-scroll {
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .pickup-desk-layout {
+    height: auto;
+    align-items: start;
+  }
+
+  .pickup-search-pane {
+    height: auto;
+    overflow: visible;
   }
 
   .pickup-search-pane,
@@ -4316,17 +4346,68 @@ svg {
   }
 
   .pickup-results-list {
-    max-height: calc(100dvh - 300px);
-    min-height: 240px;
+    max-height: none;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  /* Mobile: confirm pane becomes a bottom sheet that slides up when a name is tapped. */
+  .pickup-confirm-pane {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    height: auto;
+    max-height: 86dvh;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.18);
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+    z-index: 60;
+    overflow-y: auto;
+    padding: 14px 16px 22px;
+  }
+
+  .pickup-confirm-pane.is-open {
+    transform: translateY(0);
+  }
+
+  .pickup-sheet-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid var(--border-subtle);
+    background: #ffffff;
+    color: var(--slate-600);
+    cursor: pointer;
+  }
+
+  .pickup-sheet-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    z-index: 55;
+  }
+
+  .pickup-sheet-backdrop.is-open {
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 
 @media (max-width: 640px) {
   .mobile-bottom-nav .mobile-nav-item span {
     font-size: 10px;
-  }
-  .pickup-results-list {
-    max-height: calc(100dvh - 340px);
-    min-height: 200px;
   }
 }
