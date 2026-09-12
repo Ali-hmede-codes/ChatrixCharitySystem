@@ -15,7 +15,6 @@ import {
   IconSpreadsheet,
   IconCheck,
   IconSparkles,
-  IconUsers,
 } from "../common/Icons.jsx";
 
 export function ExcelScreen() {
@@ -158,7 +157,6 @@ export function ExcelScreen() {
               onClick={handleImportToList}
               disabled={!phoneStats?.hits}
             >
-              <IconUsers className="w-4 h-4 mr-1.5" />
               <span>Import to Beneficiaries List</span>
             </button>
           </div>
@@ -409,7 +407,6 @@ export function ExcelScreen() {
                   onClick={handleImportToList}
                   disabled={!phoneStats?.hits}
                 >
-                  <IconUsers className="w-4 h-4 mr-1.5" />
                   <span>
                     Import {phoneStats?.hits || 0} valid beneficiar{phoneStats?.hits === 1 ? "y" : "ies"}
                     {phoneStats?.invalid ? ` · skip ${phoneStats.invalid} invalid` : ""}
