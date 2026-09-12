@@ -1123,6 +1123,11 @@ export function createCampaignService(ctx) {
     if (!pickup) return { ok: false, error: "Choose which family member to undo." };
     if (!pickup.takenAt) return { ok: false, error: "This person is not marked as collected." };
     pickup.takenAt = null;
+    // Clear the recipient-level take too. Otherwise ensurePickups() would see
+    // `recipient.takenAt` still set with no taken pickup and re-migrate it back
+    // onto the pickup (reverting this undo). The per-pickup takenAidId is kept
+    // so the same aid ID is reused if they collect again.
+    target.takenAt = null;
     target.updatedAt = Date.now();
     ensurePickups(target);
     recountStats(campaign);
