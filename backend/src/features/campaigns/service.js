@@ -7,6 +7,19 @@ import { isRecipientPending, pauseCopy } from "../send/interrupt.js";
 
 const PICKUP_RESULT_LIMIT = 80;
 const MERGE_RECIPIENT_LIMIT = 5000;
+// Recipient states that mean a message was actually sent or a final decision
+// was made — these are persisted to disk immediately so a crash can never
+// lose them (and never cause a duplicate send on resume).
+const PERSIST_IMMEDIATE_STATES = new Set([
+  "waiting",
+  "delivered",
+  "skipped",
+  "failed",
+  "sms-sent",
+  "sms-failed",
+  "sms-queued",
+  "undelivered",
+]);
 const STATE_RANK = {
   delivered: 100,
   "sms-sent": 90,
@@ -469,7 +482,15 @@ export function createCampaignService(ctx) {
     }
     target.updatedAt = Date.now();
     recountStats(campaign);
-    scheduleSave();
+    // States where a message was actually sent or a final decision made are
+    // persisted to disk immediately (fire-and-forget). A crash right after
+    // sending then can't lose the "sent" record, so the person is never
+    // re-sent on resume. Transient states (checking/sending) stay debounced.
+    if (state && PERSIST_IMMEDIATE_STATES.has(state)) {
+      persistNow();
+    } else {
+      scheduleSave();
+    }
   }
 
   function interrupt(campaignId, reason, detail) {

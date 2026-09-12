@@ -79,6 +79,15 @@ export function createSendService(ctx) {
     ctx.broadcast();
   }
 
+  // Reply to a request whether or not the originating client is still
+  // connected. If the user's socket dropped, broadcast so any other tab (or
+  // the same tab after reconnect) still sees the notice/error. This keeps
+  // server-side work independent of the user's connection.
+  function reply(socket, event, payload) {
+    if (socket && socket.connected) socket.emit(event, payload);
+    else ctx.io.emit(event, payload);
+  }
+
   async function waitUntilCanSend() {
     while (sendJob.running && !sendJob.cancelled) {
       const open = Boolean(ctx.services.whatsapp?.isOpen?.());
@@ -130,6 +139,35 @@ export function createSendService(ctx) {
     ctx.io.emit("send:resumable", {
       campaigns: ctx.services.campaigns?.listResumable?.() || [],
     });
+    // No active job — auto-resume the most recent interrupted campaign that
+    // the user did not explicitly stop, so work continues after a server
+    // restart or a WhatsApp drop without anyone pressing Resume.
+    if (!sendJob.running) queueAutoResume(phone);
+  }
+
+  let autoResumeTimer = null;
+  function queueAutoResume(phone) {
+    if (autoResumeTimer) return;
+    autoResumeTimer = setTimeout(async () => {
+      autoResumeTimer = null;
+      if (sendJob.running) return;
+      if (!ctx.services.whatsapp?.isOpen?.()) return;
+      const resumable = ctx.services.campaigns?.listResumable?.() || [];
+      const candidate = resumable
+        .filter((c) => c.pauseReason !== "user_stop")
+        .sort((a, b) => (Number(b.pausedAt) || 0) - (Number(a.pausedAt) || 0))[0];
+      if (!candidate) return;
+      ctx.logger.info({ campaignId: candidate.id }, "auto-resuming interrupted campaign");
+      ctx.io.emit(
+        "send:notice",
+        `WhatsApp reconnected — automatically resuming "${candidate.name}" so the campaign continues.`
+      );
+      try {
+        await resume({ id: candidate.id }, null);
+      } catch (error) {
+        ctx.logger.warn({ err: error }, "auto-resume failed");
+      }
+    }, 2_000);
   }
 
   function normalizeRecipients(incoming, extraNumbers) {
@@ -538,11 +576,11 @@ export function createSendService(ctx) {
 
   async function start(payload, socket) {
     if (sendJob.running) {
-      socket.emit("send:error", "A send is already running.");
+      reply(socket, "send:error", "A send is already running.");
       return;
     }
     if (!ctx.services.whatsapp?.isOpen?.()) {
-      socket.emit("send:error", "Link WhatsApp with the QR code first.");
+      reply(socket, "send:error", "Link WhatsApp with the QR code first.");
       return;
     }
 
@@ -551,11 +589,11 @@ export function createSendService(ctx) {
     const nameTemplate = String(payload?.nameTemplate || "").trim();
     const recipients = normalizeRecipients(payload?.recipients, payload?.numbers);
     if (!recipients.length) {
-      socket.emit("send:error", "No Lebanon (+961) or Syria (+963) numbers found.");
+      reply(socket, "send:error", "No Lebanon (+961) or Syria (+963) numbers found.");
       return;
     }
     if (recipients.length > ctx.config.MAX_PEOPLE) {
-      socket.emit("send:error", `Maximum ${ctx.config.MAX_PEOPLE} numbers per send.`);
+      reply(socket, "send:error", `Maximum ${ctx.config.MAX_PEOPLE} numbers per send.`);
       return;
     }
 
@@ -566,7 +604,7 @@ export function createSendService(ctx) {
     });
     const checked = validateMessages(recipients, body, extrasFor);
     if (checked.error) {
-      socket.emit("send:error", checked.error);
+      reply(socket, "send:error", checked.error);
       return;
     }
 
@@ -574,7 +612,8 @@ export function createSendService(ctx) {
       payload?.enableSms !== undefined ? Boolean(payload?.enableSms) : Boolean(ctx.services.sms?.ready?.());
     const enableSms = requestedSms && Boolean(ctx.services.sms?.ready?.());
     if (requestedSms && !enableSms) {
-      socket.emit(
+      reply(
+        socket,
         "send:notice",
         "SMS is not configured. This campaign will send WhatsApp only. Open Settings & SMS to add the httpSMS API key and sender number."
       );
@@ -622,31 +661,32 @@ export function createSendService(ctx) {
 
   async function resume(payload, socket) {
     if (sendJob.running) {
-      socket.emit("send:error", "A send is already running.");
+      reply(socket, "send:error", "A send is already running.");
       return;
     }
     if (!ctx.services.whatsapp?.isOpen?.()) {
-      socket.emit("send:error", "Link WhatsApp first, then resume the unfinished campaign.");
+      reply(socket, "send:error", "Link WhatsApp first, then resume the unfinished campaign.");
       return;
     }
     const id = payload?.id || payload?.campaignId;
     const campaign = ctx.services.campaigns?.get?.(id);
     if (!campaign) {
-      socket.emit("send:error", "That campaign was not found.");
+      reply(socket, "send:error", "That campaign was not found.");
       return;
     }
     if (!campaign.resumable) {
-      socket.emit("send:error", "This campaign is already finished.");
+      reply(socket, "send:error", "This campaign is already finished.");
       return;
     }
     const allRemaining = ctx.services.campaigns.remainingRecipients(campaign.id);
     if (!allRemaining.length) {
-      socket.emit("send:error", "No remaining recipients to send.");
+      reply(socket, "send:error", "No remaining recipients to send.");
       return;
     }
     const remaining = allRemaining.slice(0, ctx.config.MAX_PEOPLE);
     if (allRemaining.length > remaining.length) {
-      socket.emit(
+      reply(
+        socket,
         "send:notice",
         `Resuming the next ${remaining.length} of ${allRemaining.length} remaining people. Merge stays one campaign — resume again after this batch.`
       );
@@ -661,7 +701,8 @@ export function createSendService(ctx) {
         : Boolean(campaign.enableSms);
     const enableSms = requestedSms && Boolean(ctx.services.sms?.ready?.());
     if (requestedSms && !enableSms) {
-      socket.emit(
+      reply(
+        socket,
         "send:notice",
         "SMS is not configured, so this resume will send WhatsApp only. Configure Settings & SMS before SMS fallback can run."
       );
@@ -673,7 +714,7 @@ export function createSendService(ctx) {
     });
     const checked = validateMessages(remaining, body, extrasFor);
     if (checked.error) {
-      socket.emit("send:error", checked.error);
+      reply(socket, "send:error", checked.error);
       return;
     }
 
