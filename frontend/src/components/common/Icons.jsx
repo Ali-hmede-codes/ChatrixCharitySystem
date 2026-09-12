@@ -31,6 +31,18 @@ export function IconMessage({ className = "w-4 h-4" }) {
   );
 }
 
+export function IconMerge({ className = "w-4 h-4" }) {
+  const size = parseIconSize(className);
+  return (
+    <svg className={`app-icon ${className}`} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 6H3v5" />
+      <path d="M21 6h-5v5" />
+      <path d="M3 11c0 5 4 8 9 8s9-3 9-8" />
+      <path d="M12 19v3" />
+    </svg>
+  );
+}
+
 export function IconUsers({ className = "w-4 h-4" }) {
   const size = parseIconSize(className);
   return (
@@ -228,6 +240,16 @@ export function IconHistory({ className = "w-4 h-4" }) {
     <svg className={`app-icon ${className}`} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="10" />
       <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
+export function IconEdit({ className = "w-4 h-4" }) {
+  const size = parseIconSize(className);
+  return (
+    <svg className={`app-icon ${className}`} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
     </svg>
   );
 }

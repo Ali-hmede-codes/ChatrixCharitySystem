@@ -638,10 +638,17 @@ export function createSendService(ctx) {
       socket.emit("send:error", "This campaign is already finished.");
       return;
     }
-    const remaining = ctx.services.campaigns.remainingRecipients(campaign.id);
-    if (!remaining.length) {
+    const allRemaining = ctx.services.campaigns.remainingRecipients(campaign.id);
+    if (!allRemaining.length) {
       socket.emit("send:error", "No remaining recipients to send.");
       return;
+    }
+    const remaining = allRemaining.slice(0, ctx.config.MAX_PEOPLE);
+    if (allRemaining.length > remaining.length) {
+      socket.emit(
+        "send:notice",
+        `Resuming the next ${remaining.length} of ${allRemaining.length} remaining people. Merge stays one campaign — resume again after this batch.`
+      );
     }
 
     const body = String(campaign.sendOptions?.message || campaign.message || "").trim();

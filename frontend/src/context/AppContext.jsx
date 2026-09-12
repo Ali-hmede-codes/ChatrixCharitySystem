@@ -397,6 +397,47 @@ export function AppProvider({ children }) {
       setLoadingCampaignDetails(false);
     });
 
+    socket.on("campaigns:saved", (result) => {
+      if (result?.details) {
+        setActiveCampaignDetails((current) => {
+          if (current && current.id === result.details.id) return result.details;
+          return current;
+        });
+      }
+      if (result?.removed) {
+        showToast(
+          result.blocked
+            ? `Removed ${result.removed} ${result.removed === 1 ? "person" : "people"}. ${result.blocked} still sending.`
+            : `Removed ${result.removed} ${result.removed === 1 ? "person" : "people"} from the campaign.`,
+          "success"
+        );
+        return;
+      }
+      showToast("Campaign updated.", "success");
+    });
+
+    socket.on("campaigns:deleted", (result) => {
+      const ids = Array.isArray(result?.ids) ? result.ids : [];
+      setActiveCampaignDetails((current) => (current && ids.includes(current.id) ? null : current));
+      const count = Number(result?.deleted) || ids.length || 1;
+      showToast(count > 1 ? `${count} campaigns deleted.` : "Campaign deleted.", "info");
+    });
+
+    socket.on("campaigns:error", (msg) => {
+      if (msg) showToast(msg, "error");
+    });
+
+    socket.on("campaigns:merged", (result) => {
+      const name = result?.campaign?.name || "one campaign";
+      const sources = Number(result?.sourceCount) || 0;
+      const people = Number(result?.totalRecipients) || 0;
+      const dupes = Number(result?.duplicates) || 0;
+      showToast(
+        `Merged ${sources} campaigns into "${name}" · ${people} people${dupes ? ` · ${dupes} shared numbers combined` : ""}.`,
+        "success"
+      );
+    });
+
     socket.on("campaigns:recipient", (event) => {
       if (!event?.campaignId || !event?.recipient) return;
       const nextRecipient = event.recipient;
@@ -639,10 +680,34 @@ export function AppProvider({ children }) {
   function deleteCampaign(id) {
     if (!socketRef.current || !id) return;
     socketRef.current.emit("campaigns:delete", { id });
-    showToast("Campaign deleted.", "info");
-    if (activeCampaignDetails?.id === id) {
-      setActiveCampaignDetails(null);
+  }
+
+  function deleteCampaigns(ids) {
+    if (!socketRef.current) return;
+    const list = (Array.isArray(ids) ? ids : []).filter(Boolean);
+    if (!list.length) return;
+    if (list.length === 1) {
+      socketRef.current.emit("campaigns:delete", { id: list[0] });
+      return;
     }
+    socketRef.current.emit("campaigns:delete-many", { ids: list });
+  }
+
+  function updateCampaign(id, patch) {
+    if (!socketRef.current || !id) return;
+    socketRef.current.emit("campaigns:update", { id, ...patch });
+  }
+
+  function removeCampaignRecipients(id, phones) {
+    if (!socketRef.current || !id) return;
+    socketRef.current.emit("campaigns:remove-recipients", { id, phones });
+  }
+
+  function mergeCampaigns(ids, name) {
+    if (!socketRef.current) return;
+    const list = (Array.isArray(ids) ? ids : []).filter(Boolean);
+    if (list.length < 2) return;
+    socketRef.current.emit("campaigns:merge", { ids: list, name });
   }
 
   function searchPickup(payload = {}) {
@@ -741,6 +806,10 @@ export function AppProvider({ children }) {
     fetchCampaignDetails,
     clearCampaignDetails,
     deleteCampaign,
+    deleteCampaigns,
+    updateCampaign,
+    removeCampaignRecipients,
+    mergeCampaigns,
     pickupBusy,
     pickupResults,
     searchPickup,

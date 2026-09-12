@@ -10,6 +10,7 @@ import {
   IconRefresh,
   IconX,
   IconTicket,
+  IconHistory,
 } from "../common/Icons.jsx";
 
 export function Sidebar() {
@@ -127,6 +128,19 @@ export function Sidebar() {
                 </span>
               ) : people.length > 0 ? (
                 <span className="sidebar-nav-badge">{people.length}</span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              className={`sidebar-nav-item ${currentStep === "campaigns" ? "active" : ""}`}
+              onClick={() => setCurrentStep("campaigns")}
+            >
+              <span className="sidebar-nav-icon">
+                <IconHistory className="w-4 h-4" />
+              </span>
+              <span className="sidebar-nav-label">Campaigns</span>
+              {campaigns.length > 0 ? (
+                <span className="sidebar-nav-badge">{campaigns.length}</span>
               ) : null}
             </button>
             <button

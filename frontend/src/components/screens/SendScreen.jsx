@@ -413,14 +413,24 @@ export function SendScreen() {
           )}
 
           {activeTab === "history" && (
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => setActiveTab("compose")}
-            >
-              <IconSend className="w-3.5 h-3.5 mr-1" />
-              <span>New Campaign</span>
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setCurrentStep("campaigns")}
+              >
+                <IconHistory className="w-3.5 h-3.5 mr-1" />
+                <span>Manage campaigns</span>
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setActiveTab("compose")}
+              >
+                <IconSend className="w-3.5 h-3.5 mr-1" />
+                <span>New Campaign</span>
+              </button>
+            </>
           )}
         </div>
       </div>

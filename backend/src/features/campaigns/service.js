@@ -1,11 +1,26 @@
 import { createCampaignRepository } from "./repository.js";
 import { plusPhone } from "../../shared/phone.js";
-import { namesFromRecipient, namesEqual, personSlots } from "../../shared/names.js";
+import { namesFromRecipient, namesEqual, personSlots, uniquePersonNames } from "../../shared/names.js";
 import { matchesText, normalizeSearch } from "../../shared/search.js";
 import { campaignDayKey, formatAidId, maxAidSeqForDay } from "../../shared/aid-id.js";
 import { isRecipientPending, pauseCopy } from "../send/interrupt.js";
 
 const PICKUP_RESULT_LIMIT = 80;
+const MERGE_RECIPIENT_LIMIT = 5000;
+const STATE_RANK = {
+  delivered: 100,
+  "sms-sent": 90,
+  waiting: 80,
+  "sms-queued": 70,
+  undelivered: 60,
+  "sms-failed": 50,
+  skipped: 40,
+  failed: 30,
+  retry: 20,
+  sending: 15,
+  queued: 10,
+  pending: 5,
+};
 
 export function createCampaignService(ctx) {
   const repo = createCampaignRepository(ctx);
@@ -261,6 +276,7 @@ export function createCampaignService(ctx) {
       totalPeople: Number(c.stats?.people) || c.totalRecipients,
       remainingCount: remaining,
       resumable: c.status !== "completed" && remaining > 0,
+      mergedFrom: Number(c.mergedFrom) || 0,
       stats: { ...c.stats },
     };
   }
@@ -492,11 +508,268 @@ export function createCampaignService(ctx) {
     ctx.io.emit("send:resumable", { campaigns: listResumable() });
   }
 
-  async function deleteCampaign(campaignId) {
-    campaigns = campaigns.filter((c) => c.id !== String(campaignId));
+  function runningCampaignId() {
+    if (!ctx.services.send?.isRunning?.()) return "";
+    return String(ctx.services.send?.getStatus?.()?.campaignId || "");
+  }
+
+  function publishCampaign(campaign) {
     scheduleSave();
     ctx.io.emit("campaigns:data", { campaigns: list() });
+    if (campaign) ctx.io.emit("campaigns:update", publicSummary(campaign));
     ctx.io.emit("send:resumable", { campaigns: listResumable() });
+  }
+
+  function updateCampaign(campaignId, patch = {}) {
+    const campaign = campaigns.find((c) => c.id === String(campaignId));
+    if (!campaign) return { ok: false, error: "Campaign not found." };
+
+    if (patch.name !== undefined) {
+      const name = String(patch.name || "").replace(/\s+/g, " ").trim().slice(0, 160);
+      if (!name) return { ok: false, error: "Enter a campaign name." };
+      campaign.name = name;
+    }
+    if (patch.message !== undefined) {
+      const message = String(patch.message || "").trim();
+      campaign.message = message;
+      if (!campaign.sendOptions) campaign.sendOptions = {};
+      campaign.sendOptions.message = message;
+    }
+    if (patch.enableSms !== undefined) {
+      const next = Boolean(patch.enableSms) && Boolean(ctx.services.sms?.ready?.());
+      campaign.enableSms = next;
+      if (!campaign.sendOptions) campaign.sendOptions = {};
+      campaign.sendOptions.enableSms = next;
+    }
+
+    publishCampaign(campaign);
+    return { ok: true, campaign: publicSummary(campaign), details: get(campaign.id) };
+  }
+
+  function removeRecipients(campaignId, phones = []) {
+    const campaign = campaigns.find((c) => c.id === String(campaignId));
+    if (!campaign) return { ok: false, error: "Campaign not found." };
+
+    const wanted = new Set((Array.isArray(phones) ? phones : []).map((phone) => plusPhone(phone)).filter(Boolean));
+    if (!wanted.size) return { ok: false, error: "Choose at least one person to remove." };
+
+    const live = runningCampaignId() === campaign.id;
+    const next = [];
+    let removed = 0;
+    let blocked = 0;
+    for (const recipient of campaign.recipients || []) {
+      if (!wanted.has(recipient.phone)) {
+        next.push(recipient);
+        continue;
+      }
+      if (live && recipient.state === "sending") {
+        blocked += 1;
+        next.push(recipient);
+        continue;
+      }
+      removed += 1;
+    }
+
+    if (!removed) {
+      return {
+        ok: false,
+        error: blocked
+          ? "Those people are being sent to right now. Wait until that send finishes, then remove them."
+          : "No matching people to remove.",
+      };
+    }
+
+    campaign.recipients = next;
+    recountStats(campaign);
+    campaign.totalRecipients = next.length;
+    publishCampaign(campaign);
+    return {
+      ok: true,
+      removed,
+      blocked,
+      campaign: publicSummary(campaign),
+      details: get(campaign.id),
+    };
+  }
+
+  async function deleteCampaign(campaignId) {
+    const id = String(campaignId || "");
+    if (!id) return { ok: false, error: "Campaign not found." };
+    if (runningCampaignId() === id) {
+      return { ok: false, error: "Stop the live send first, then delete this campaign." };
+    }
+    const before = campaigns.length;
+    campaigns = campaigns.filter((c) => c.id !== id);
+    if (campaigns.length === before) return { ok: false, error: "Campaign not found." };
+    publishCampaign(null);
+    return { ok: true, deleted: 1, ids: [id] };
+  }
+
+  async function deleteMany(ids) {
+    const wanted = new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || "")).filter(Boolean));
+    if (!wanted.size) return { ok: false, error: "Choose at least one campaign to delete." };
+    const live = runningCampaignId();
+    if (live && wanted.has(live)) {
+      return { ok: false, error: "Stop the live send first. The running campaign was not deleted." };
+    }
+    const removedIds = campaigns.filter((c) => wanted.has(c.id)).map((c) => c.id);
+    if (!removedIds.length) return { ok: false, error: "No matching campaigns to delete." };
+    campaigns = campaigns.filter((c) => !wanted.has(c.id));
+    publishCampaign(null);
+    return { ok: true, deleted: removedIds.length, ids: removedIds };
+  }
+
+  function mergePickupLists(left, right) {
+    const byKey = new Map();
+    for (const pickup of [...(left || []), ...(right || [])]) {
+      const name = String(pickup?.name || "").replace(/\s+/g, " ").trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      const current = byKey.get(key);
+      if (!current) {
+        byKey.set(key, {
+          name,
+          takenAt: pickup.takenAt ? Number(pickup.takenAt) : null,
+          takenAidId: String(pickup.takenAidId || "").trim(),
+          printCount: Number(pickup.printCount) || 0,
+        });
+        continue;
+      }
+      if (pickup.takenAt && !current.takenAt) {
+        current.takenAt = Number(pickup.takenAt);
+        current.takenAidId = String(pickup.takenAidId || current.takenAidId || "").trim();
+      } else if (pickup.takenAt && current.takenAt) {
+        current.takenAidId = current.takenAidId || String(pickup.takenAidId || "").trim();
+      }
+      current.printCount = Math.max(Number(current.printCount) || 0, Number(pickup.printCount) || 0);
+    }
+    return [...byKey.values()];
+  }
+
+  function mergeTwoRecipients(base, extra) {
+    ensurePickups(base);
+    ensurePickups(extra);
+    const names = uniquePersonNames([...namesFromRecipient(base), ...namesFromRecipient(extra)]);
+    const preferExtra = (STATE_RANK[extra.state] || 0) > (STATE_RANK[base.state] || 0);
+    const winner = preferExtra ? extra : base;
+    const loser = preferExtra ? base : extra;
+    base.names = names;
+    base.name = names.join(" + ") || winner.name || loser.name || "";
+    base.code = String(base.code || extra.code || "").trim();
+    base.state = winner.state || base.state;
+    base.channel = winner.channel && winner.channel !== "none" ? winner.channel : loser.channel || "none";
+    base.detail = winner.detail || loser.detail || "";
+    base.sentNames = uniquePersonNames([...(base.sentNames || []), ...(extra.sentNames || [])]);
+    base.updatedAt = Math.max(Number(base.updatedAt) || 0, Number(extra.updatedAt) || 0) || Date.now();
+    base.pickups = mergePickupLists(base.pickups, extra.pickups);
+    ensurePickups(base);
+    return base;
+  }
+
+  function mergeCampaigns(ids, { name } = {}) {
+    const wanted = (Array.isArray(ids) ? ids : []).map((id) => String(id || "")).filter(Boolean);
+    const uniqueIds = [...new Set(wanted)];
+    if (uniqueIds.length < 2) {
+      return { ok: false, error: "Select at least two campaigns to merge." };
+    }
+
+    const live = runningCampaignId();
+    if (live && uniqueIds.includes(live)) {
+      return { ok: false, error: "Stop the live send first, then merge. The running campaign cannot be merged yet." };
+    }
+
+    const sources = uniqueIds
+      .map((id) => campaigns.find((c) => c.id === id))
+      .filter(Boolean)
+      .sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0));
+
+    if (sources.length < 2) {
+      return { ok: false, error: "Those campaigns were not found. Refresh and select them again." };
+    }
+
+    const byPhone = new Map();
+    let duplicates = 0;
+    for (const source of sources) {
+      for (const recipient of source.recipients || []) {
+        const phone = plusPhone(recipient.phone);
+        if (!phone) continue;
+        const copy = {
+          ...recipient,
+          phone,
+          names: namesFromRecipient(recipient),
+          pickups: Array.isArray(recipient.pickups) ? recipient.pickups.map((p) => ({ ...p })) : [],
+          sentNames: Array.isArray(recipient.sentNames) ? [...recipient.sentNames] : [],
+        };
+        ensurePickups(copy);
+        if (byPhone.has(phone)) {
+          mergeTwoRecipients(byPhone.get(phone), copy);
+          duplicates += 1;
+        } else {
+          byPhone.set(phone, copy);
+        }
+      }
+    }
+
+    const mergedRecipients = [...byPhone.values()];
+    if (!mergedRecipients.length) {
+      return { ok: false, error: "Those campaigns have no people to merge." };
+    }
+    if (mergedRecipients.length > MERGE_RECIPIENT_LIMIT) {
+      return {
+        ok: false,
+        error: `Merged list would be ${mergedRecipients.length} numbers. Maximum in one campaign is ${MERGE_RECIPIENT_LIMIT}.`,
+      };
+    }
+
+    const firstWithMessage = sources.find((c) => String(c.message || "").trim()) || sources[0];
+    const title = String(name || "").replace(/\s+/g, " ").trim().slice(0, 160);
+    const dayLabel = new Date(sources[0].createdAt).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+    const remaining = mergedRecipients.filter(isRecipientPending).length;
+    const enableSms = sources.some((c) => c.enableSms || c.sendOptions?.enableSms) && Boolean(ctx.services.sms?.ready?.());
+
+    const merged = {
+      id: `camp-merge-${Date.now()}`,
+      name: title || `حملة مدمجة - ${dayLabel}`,
+      createdAt: Number(sources[0].createdAt) || Date.now(),
+      completedAt: remaining ? null : Date.now(),
+      pausedAt: remaining ? Date.now() : null,
+      status: remaining ? "interrupted" : "completed",
+      pauseReason: remaining ? "merged" : null,
+      enableSms,
+      message: String(firstWithMessage.message || "").trim(),
+      aidCode: String(sources.find((c) => c.aidCode)?.aidCode || "").trim(),
+      senderPhone: String([...sources].reverse().find((c) => c.senderPhone)?.senderPhone || ""),
+      sendOptions: {
+        message: String(firstWithMessage.sendOptions?.message || firstWithMessage.message || "").trim(),
+        useNameTemplate: sources.some((c) => c.sendOptions?.useNameTemplate),
+        nameTemplate: String(firstWithMessage.sendOptions?.nameTemplate || sources[0].sendOptions?.nameTemplate || ""),
+        enableSms,
+      },
+      mergedFrom: sources.reduce((sum, c) => sum + (Number(c.mergedFrom) || 1), 0),
+      totalRecipients: mergedRecipients.length,
+      stats: {},
+      recipients: mergedRecipients,
+    };
+
+    for (const recipient of merged.recipients) ensurePickups(recipient);
+    recountStats(merged);
+
+    const sourceIds = sources.map((c) => c.id);
+    campaigns = [merged, ...campaigns.filter((c) => !sourceIds.includes(c.id))];
+    publishCampaign(merged);
+    return {
+      ok: true,
+      campaign: publicSummary(merged),
+      details: get(merged.id),
+      sourceIds,
+      sourceCount: sourceIds.length,
+      totalRecipients: merged.totalRecipients,
+      duplicates,
+    };
   }
 
   function emit(socket) {
@@ -704,7 +977,9 @@ export function createCampaignService(ctx) {
     listResumable,
     get,
     create,
+    update: updateCampaign,
     updateRecipient,
+    removeRecipients,
     interrupt,
     markRunning,
     setSenderPhone,
@@ -713,6 +988,8 @@ export function createCampaignService(ctx) {
     syncBatchStats,
     finishCampaign,
     delete: deleteCampaign,
+    deleteMany,
+    merge: mergeCampaigns,
     emit,
     searchPickup,
     markTaken,

@@ -77,6 +77,7 @@ export function createCampaignRepository(ctx) {
         nameTemplate: String(c.sendOptions?.nameTemplate || ""),
         enableSms: c.sendOptions?.enableSms !== undefined ? Boolean(c.sendOptions.enableSms) : Boolean(c.enableSms),
       },
+      mergedFrom: Number(c.mergedFrom) || 0,
       totalRecipients: Number(c.totalRecipients) || 0,
       stats: {
         sent: Number(c.stats?.sent) || 0,
@@ -91,7 +92,7 @@ export function createCampaignRepository(ctx) {
         people: Number(c.stats?.people) || 0,
       },
       recipients: Array.isArray(c.recipients)
-        ? c.recipients.map(sanitizeRecipient).filter(Boolean).slice(0, 400)
+        ? c.recipients.map(sanitizeRecipient).filter(Boolean).slice(0, 5000)
         : [],
     };
   }

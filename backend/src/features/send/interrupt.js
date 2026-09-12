@@ -37,6 +37,10 @@ export const PAUSE_COPY = {
     title: "Chatrix restarted",
     detail: "The computer or app restarted while a campaign was running. Press Resume to continue from the remaining recipients.",
   },
+  merged: {
+    title: "Merged campaign",
+    detail: "This campaign was combined from several send batches. Resume anytime to send anyone still waiting.",
+  },
 };
 
 export function isRecipientPending(recipient) {

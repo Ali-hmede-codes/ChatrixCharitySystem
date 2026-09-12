@@ -7,6 +7,7 @@ import {
   IconSettings,
   IconShield,
   IconTicket,
+  IconHistory,
 } from "../common/Icons.jsx";
 
 export function MobileTopBar() {
@@ -78,6 +79,13 @@ export function MobileBottomNav() {
       icon: <IconSend className="w-5 h-5" />,
       active: sendActive,
       onClick: goSendings,
+    },
+    {
+      id: "campaigns",
+      label: "Campaigns",
+      icon: <IconHistory className="w-5 h-5" />,
+      active: currentStep === "campaigns",
+      onClick: () => setCurrentStep("campaigns"),
     },
     {
       id: "pickup",
