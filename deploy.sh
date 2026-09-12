@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # CloudPanel deploy for Chatrix Charity System.
+# Installs NVM + Node 20, system build tools, npm deps, frontend build, PM2.
 # Nginx stays as you already set it (proxy to 127.0.0.1:$APP_PORT).
 #
 # Usage:
 #   sudo bash deploy.sh
-#   sudo bash deploy.sh --port 4173 --lock 4179 --open 80,443
+#   sudo bash deploy.sh --user SITEUSER --domain example.com --port 4173 --open 80,443
 #
 # If you uploaded this file from Windows and it fails with $'\r':
 #   sed -i 's/\r$//' deploy.sh && bash deploy.sh
@@ -26,9 +27,9 @@ LOCK_PORT="${LOCK_PORT:-4179}"
 # 0.0.0.0   = also reachable on the server IP:APP_PORT
 HOST="${HOST:-127.0.0.1}"
 # Extra TCP ports to allow when UFW is already active (comma or space).
-# Example: "80,443" or "80 443 4173"
 FIREWALL_PORTS="${FIREWALL_PORTS:-80,443}"
-NODE_MAJOR="${NODE_MAJOR:-20}"
+NODE_VERSION="${NODE_VERSION:-20}"
+NVM_VERSION="${NVM_VERSION:-v0.40.3}"
 
 # =============================================================================
 # CLI
@@ -47,6 +48,7 @@ Usage: sudo bash deploy.sh [options]
   --lock N           Internal lock port (default: 4179)
   --host ADDR        Bind address (default: 127.0.0.1)
   --open PORTS       Firewall ports, e.g. 80,443 or 80 443 4173
+  --node VER         Node version for nvm (default: 20, or .nvmrc)
   -h, --help         Show this help
 EOF
 }
@@ -63,6 +65,7 @@ while [ $# -gt 0 ]; do
     --lock) LOCK_PORT="${2:-}"; shift 2 ;;
     --host) HOST="${2:-}"; shift 2 ;;
     --open) FIREWALL_PORTS="${2:-}"; shift 2 ;;
+    --node) NODE_VERSION="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
@@ -71,23 +74,7 @@ done
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"
-}
-
 is_root() { [ "$(id -u)" -eq 0 ]; }
-
-as_site() {
-  if [ "$(id -un)" = "$SITE_USER" ]; then
-    env PATH="$PATH" bash -c "$*"
-  else
-    sudo -H -u "$SITE_USER" env PATH="$PATH" HOME="$SITE_HOME" bash -c "$*"
-  fi
-}
-
-node_major() {
-  node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0
-}
 
 parse_ports() {
   echo "$1" | tr ',' ' ' | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//'
@@ -98,6 +85,33 @@ valid_port() {
     ''|*[!0-9]*) return 1 ;;
   esac
   [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+# Run as the site user. $1 = 1 to load nvm first, $2 = command.
+as_site() {
+  local load_nvm="$1"
+  local cmd="$2"
+  local wrapper
+
+  wrapper="set -euo pipefail
+export HOME=\"\$HOME\"
+export NVM_DIR=\"\$HOME/.nvm\"
+"
+  if [ "$load_nvm" = 1 ]; then
+    wrapper="${wrapper}
+[ -s \"\$NVM_DIR/nvm.sh\" ] || { echo \"nvm is not installed\" >&2; exit 1; }
+. \"\$NVM_DIR/nvm.sh\"
+"
+  fi
+  wrapper="${wrapper}
+${cmd}
+"
+
+  if [ "$(id -un)" = "$SITE_USER" ]; then
+    env HOME="$SITE_HOME" NVM_DIR="${SITE_HOME}/.nvm" bash -c "$wrapper"
+  else
+    sudo -H -u "$SITE_USER" env HOME="$SITE_HOME" NVM_DIR="${SITE_HOME}/.nvm" bash -c "$wrapper"
+  fi
 }
 
 # =============================================================================
@@ -131,6 +145,7 @@ valid_port "$LOCK_PORT" || die "Invalid --lock: $LOCK_PORT"
 
 SITE_HOME="$(getent passwd "$SITE_USER" | cut -d: -f6)"
 [ -n "$SITE_HOME" ] || die "Cannot find home for $SITE_USER"
+[ -d "$SITE_HOME" ] || die "Home directory missing: $SITE_HOME"
 
 OPEN_LIST="$(parse_ports "$FIREWALL_PORTS")"
 for p in $OPEN_LIST; do
@@ -142,41 +157,30 @@ echo "App dir   : $APP_DIR"
 echo "Repo      : $REPO_URL ($BRANCH)"
 echo "PM2 name  : $APP_NAME"
 echo "Bind      : ${HOST}:${APP_PORT}  lock=${LOCK_PORT}"
+echo "Node/nvm  : nvm ${NVM_VERSION} + Node ${NODE_VERSION}"
 echo "Firewall  : ${OPEN_LIST:-<none>}"
 
 # =============================================================================
-# Packages
+# System packages needed to clone, compile better-sqlite3, and fetch nvm
 # =============================================================================
 if is_root && command -v apt-get >/dev/null 2>&1; then
   log "Installing system packages"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
-  apt-get install -y git curl ca-certificates build-essential python3
+  apt-get install -y \
+    git \
+    curl \
+    ca-certificates \
+    build-essential \
+    python3 \
+    make \
+    g++
+elif ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+  die "Need git and curl. Re-run with sudo so apt can install them."
 fi
 
-if ! command -v node >/dev/null 2>&1 || [ "$(node_major)" -lt "$NODE_MAJOR" ]; then
-  is_root || die "Node.js ${NODE_MAJOR}+ is required. Run this script with sudo so it can install Node."
-  log "Installing Node.js ${NODE_MAJOR}.x"
-  curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash -
-  apt-get install -y nodejs
-fi
-
-need_cmd node
-need_cmd npm
-need_cmd git
-
-[ "$(node_major)" -ge "$NODE_MAJOR" ] || die "Node $(node -v) is too old. Need ${NODE_MAJOR}+"
-
-if ! command -v pm2 >/dev/null 2>&1; then
-  log "Installing PM2"
-  if is_root; then
-    npm install -g pm2
-  else
-    npm install -g pm2
-  fi
-fi
-
-need_cmd pm2
+command -v git >/dev/null 2>&1 || die "git is required"
+command -v curl >/dev/null 2>&1 || die "curl is required"
 
 # =============================================================================
 # Download / update
@@ -199,6 +203,10 @@ fi
 
 [ -f "$APP_DIR/backend/package.json" ] || die "backend/package.json not found in $APP_DIR"
 
+if [ -f "$APP_DIR/.nvmrc" ]; then
+  NODE_VERSION="$(tr -d '[:space:]' < "$APP_DIR/.nvmrc")"
+fi
+
 # =============================================================================
 # Permissions
 # =============================================================================
@@ -212,6 +220,38 @@ chmod 700 "$APP_DIR/backend/.auth" "$APP_DIR/backend/auth_session"
 if is_root; then
   chown -R "${SITE_USER}:${SITE_USER}" "$APP_DIR/backend/.auth" "$APP_DIR/backend/auth_session"
 fi
+
+# =============================================================================
+# NVM + Node + PM2 (installed for the site user, not root)
+# =============================================================================
+log "Installing nvm, Node ${NODE_VERSION}, and PM2 for $SITE_USER"
+as_site 0 "
+  export NVM_DIR=\"\$HOME/.nvm\"
+  if [ ! -s \"\$NVM_DIR/nvm.sh\" ]; then
+    curl -fsSL 'https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh' | bash
+  fi
+  . \"\$NVM_DIR/nvm.sh\"
+  cd '${APP_DIR}'
+  nvm install '${NODE_VERSION}'
+  nvm use '${NODE_VERSION}'
+  nvm alias default '${NODE_VERSION}'
+  npm install -g pm2
+  node -v
+  npm -v
+  pm2 -v
+"
+
+NODE_BIN="$(as_site 1 'command -v node' | tail -n1 | tr -d '\r')"
+NPM_BIN="$(as_site 1 'command -v npm' | tail -n1 | tr -d '\r')"
+PM2_BIN="$(as_site 1 'command -v pm2' | tail -n1 | tr -d '\r')"
+[ -x "$NODE_BIN" ] || die "nvm node binary not found"
+[ -x "$NPM_BIN" ] || die "nvm npm binary not found"
+[ -x "$PM2_BIN" ] || die "pm2 binary not found"
+NODE_DIR="$(dirname "$NODE_BIN")"
+
+echo "node : $NODE_BIN ($("$NODE_BIN" -v))"
+echo "npm  : $NPM_BIN"
+echo "pm2  : $PM2_BIN"
 
 # =============================================================================
 # Firewall
@@ -232,11 +272,10 @@ elif [ -n "$OPEN_LIST" ]; then
 fi
 
 # =============================================================================
-# Install + build
+# Install + build with the nvm Node
 # =============================================================================
 log "Installing npm packages and building frontend"
-as_site "cd '$APP_DIR/backend' && npm install --omit=dev"
-as_site "cd '$APP_DIR/frontend' && npm install && npm run build"
+as_site 1 "cd '${APP_DIR}' && npm run setup"
 
 # =============================================================================
 # PM2
@@ -249,7 +288,7 @@ module.exports = {
       name: "${APP_NAME}",
       cwd: "${APP_DIR}/backend",
       script: "src/index.js",
-      interpreter: "node",
+      interpreter: "${NODE_BIN}",
       instances: 1,
       exec_mode: "fork",
       autorestart: true,
@@ -260,6 +299,7 @@ module.exports = {
         HOST: "${HOST}",
         PORT: "${APP_PORT}",
         LOCK_PORT: "${LOCK_PORT}",
+        PATH: "${NODE_DIR}:/usr/local/bin:/usr/bin:/bin",
       },
     },
   ],
@@ -270,22 +310,23 @@ if is_root; then
   chown "${SITE_USER}:${SITE_USER}" "$APP_DIR/ecosystem.config.cjs"
 fi
 
-as_site "cd '$APP_DIR' && pm2 delete '${APP_NAME}' >/dev/null 2>&1 || true"
-as_site "cd '$APP_DIR' && pm2 start ecosystem.config.cjs"
-as_site "pm2 save"
+as_site 1 "cd '${APP_DIR}' && pm2 delete '${APP_NAME}' >/dev/null 2>&1 || true"
+as_site 1 "cd '${APP_DIR}' && pm2 start ecosystem.config.cjs"
+as_site 1 "pm2 save"
 
 if is_root; then
   log "Enabling PM2 startup on reboot for $SITE_USER"
-  env PATH="$PATH" pm2 startup systemd -u "$SITE_USER" --hp "$SITE_HOME" || true
-  as_site "pm2 save"
+  env PATH="${NODE_DIR}:${PATH}" "$PM2_BIN" startup systemd -u "$SITE_USER" --hp "$SITE_HOME" || true
+  as_site 1 "pm2 save"
 fi
 
 log "Done"
+echo "Node     : $("$NODE_BIN" -v) via nvm (${NODE_BIN})"
 echo "App      : http://${HOST}:${APP_PORT}"
-echo "PM2      : pm2 status"
+echo "PM2      : $PM2_BIN status"
 echo "Logs     : pm2 logs ${APP_NAME}"
 echo "Restart  : pm2 restart ${APP_NAME}"
 echo
 echo "Point Nginx (already set) to: http://127.0.0.1:${APP_PORT}"
 echo "Keep websocket / socket.io proxy enabled."
-as_site "pm2 status"
+as_site 1 "pm2 status"
