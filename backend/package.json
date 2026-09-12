@@ -1,0 +1,23 @@
+{
+  "name": "chatrix-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@zapo-js/store-sqlite": "^1.2.0",
+    "@zapo-js/wam": "^0.1.1",
+    "better-sqlite3": "^12.4.1",
+    "express": "^5.1.0",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.1",
+    "wa-store-migrate": "^0.1.1",
+    "zapo-js": "^1.8.2"
+  }
+}
