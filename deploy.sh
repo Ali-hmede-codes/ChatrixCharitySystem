@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Deploy Chatrix Charity System with PM2.
-# Default app folder is /var/www/CharityChatrixSystem.
+# Default app folder is /var/www/ChatrixCharitySystem.
 # Installs NVM + Node 20, npm deps, frontend build, then starts PM2.
 # Nginx stays as you already set it (proxy to 127.0.0.1:$APP_PORT).
 #
 # Usage:
-#   sudo bash deploy.sh --dir /var/www/CharityChatrixSystem
-#   sudo bash deploy.sh --user www-data --dir /var/www/CharityChatrixSystem --port 4173
+#   sudo bash deploy.sh --dir /var/www/ChatrixCharitySystem
+#   sudo bash deploy.sh --user www-data --dir /var/www/ChatrixCharitySystem --port 4173
 #   sudo bash update.sh
 #     (after git pull: rebuild UI and show the app in pm2 list)
 #
@@ -20,7 +20,7 @@ set -euo pipefail
 # =============================================================================
 SITE_USER="${SITE_USER:-}"
 DOMAIN="${DOMAIN:-}"
-APP_DIR="${APP_DIR:-/var/www/CharityChatrixSystem}"
+APP_DIR="${APP_DIR:-/var/www/ChatrixCharitySystem}"
 REPO_URL="${REPO_URL:-https://github.com/Ali-hmede-codes/ChatrixCharitySystem.git}"
 BRANCH="${BRANCH:-main}"
 APP_NAME="${APP_NAME:-chatrix}"
@@ -43,7 +43,7 @@ Usage: sudo bash deploy.sh [options]
 
   --user NAME        Linux user that owns the app and PM2 list
   --domain NAME      Optional CloudPanel folder under /home/USER/htdocs
-  --dir PATH         App directory (default: /var/www/CharityChatrixSystem)
+  --dir PATH         App directory (default: /var/www/ChatrixCharitySystem)
   --repo URL         Git repo to clone or pull
   --branch NAME      Git branch (default: main)
   --name NAME        PM2 process name (default: chatrix)
@@ -178,7 +178,7 @@ id "$SITE_USER" >/dev/null 2>&1 || die "User '$SITE_USER' does not exist."
 if [ "$PROVIDED_DOMAIN" = 1 ]; then
   ask_var DOMAIN "$PROVIDED_DOMAIN" "CloudPanel domain folder (optional)" ""
 fi
-ask_var APP_DIR "$PROVIDED_DIR" "App directory" "${APP_DIR:-/var/www/CharityChatrixSystem}"
+ask_var APP_DIR "$PROVIDED_DIR" "App directory" "${APP_DIR:-/var/www/ChatrixCharitySystem}"
 ask_var APP_PORT "$PROVIDED_PORT" "App port for Nginx" "4173"
 ask_var LOCK_PORT "$PROVIDED_LOCK" "Internal lock port" "4179"
 ask_var FIREWALL_PORTS "$PROVIDED_OPEN" "Firewall ports to allow" "80,443"
@@ -189,7 +189,7 @@ if [ -z "$APP_DIR" ]; then
   elif [ -n "${DOMAIN:-}" ]; then
     APP_DIR="/home/${SITE_USER}/htdocs/${DOMAIN}"
   else
-    APP_DIR="/var/www/CharityChatrixSystem"
+    APP_DIR="/var/www/ChatrixCharitySystem"
   fi
 fi
 

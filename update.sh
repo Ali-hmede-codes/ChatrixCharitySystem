@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Pull, rebuild, and register Chatrix in THIS user's PM2 list.
-# Default app folder: /var/www/CharityChatrixSystem
+# Default app folder: /var/www/ChatrixCharitySystem
 #
-#   cd /var/www/CharityChatrixSystem
+#   cd /var/www/ChatrixCharitySystem
 #   sudo bash update.sh
 #   sudo pm2 list
 #
@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/var/www/CharityChatrixSystem}"
+APP_DIR="${APP_DIR:-/var/www/ChatrixCharitySystem}"
 APP_NAME="${APP_NAME:-chatrix}"
 
 if [ -s "${HOME}/.nvm/nvm.sh" ]; then

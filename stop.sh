@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Stop Chatrix in PM2 and kill leftover Node copies on the app ports.
-# After this, the website should be down until you start PM2 again.
+# Stop PM2 chatrix and kill leftover Node copies of THIS app.
+# Folder: /var/www/ChatrixCharitySystem
 
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/var/www/CharityChatrixSystem}"
+APP_DIR="${APP_DIR:-/var/www/ChatrixCharitySystem}"
 APP_NAME="${APP_NAME:-chatrix}"
 APP_PORT="${PORT:-4173}"
 LOCK_PORT="${LOCK_PORT:-4179}"
@@ -19,7 +19,6 @@ fi
 
 if command -v pm2 >/dev/null 2>&1; then
   pm2 stop "${APP_NAME}" >/dev/null 2>&1 || true
-  pm2 delete "${APP_NAME}" >/dev/null 2>&1 || true
 fi
 
 if command -v fuser >/dev/null 2>&1; then
@@ -28,10 +27,24 @@ fi
 
 if command -v pkill >/dev/null 2>&1; then
   pkill -f "${APP_DIR}/backend/src/index.js" >/dev/null 2>&1 || true
+  pkill -f "${APP_DIR}/backend" >/dev/null 2>&1 || true
 fi
 
-echo "Chatrix is stopped. Website should be down."
-echo "Start again: cd ${APP_DIR} && sudo pm2 start ecosystem.config.cjs && sudo pm2 save"
+sleep 1
+
+echo
+echo "PM2 chatrix:"
 if command -v pm2 >/dev/null 2>&1; then
-  pm2 list
+  pm2 list | grep -E 'chatrix|name' || pm2 list
 fi
+
+echo
+echo "What is still listening (leftover Node or Nginx):"
+if command -v ss >/dev/null 2>&1; then
+  ss -lptn | grep -E ':4173|:4174|:4179|:80|:443' || echo "(nothing on 4173/4174/4179/80/443)"
+fi
+
+echo
+echo "If :80 or :443 still show nginx, the HTML page can still open."
+echo "That is Nginx, not Chatrix. Chatrix is only Node on ${APP_PORT}."
+echo "Start again: cd ${APP_DIR} && pm2 start ecosystem.config.cjs && pm2 save"
