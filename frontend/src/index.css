@@ -4014,6 +4014,12 @@ svg {
   min-height: 420px;
 }
 
+.pickup-search-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .pickup-search-hero {
   padding: 14px 16px 10px;
   border-bottom: 1px solid var(--border-subtle);
@@ -4065,8 +4071,13 @@ svg {
 .pickup-results-list {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 120px;
   max-height: 560px;
   overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .pickup-result-row {
@@ -4101,9 +4112,15 @@ svg {
 .pickup-result-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   font-size: 11.5px;
   color: var(--slate-500);
+  min-width: 0;
+}
+
+.pickup-result-row > .chip-badge {
+  flex-shrink: 0;
 }
 
 .pickup-date-row {
@@ -4292,10 +4309,24 @@ svg {
   .pickup-confirm-pane {
     position: static;
   }
+
+  .pickup-search-pane,
+  .pickup-confirm-pane {
+    min-height: 0;
+  }
+
+  .pickup-results-list {
+    max-height: calc(100dvh - 300px);
+    min-height: 240px;
+  }
 }
 
 @media (max-width: 640px) {
   .mobile-bottom-nav .mobile-nav-item span {
     font-size: 10px;
+  }
+  .pickup-results-list {
+    max-height: calc(100dvh - 340px);
+    min-height: 200px;
   }
 }
