@@ -30,6 +30,18 @@ if command -v pkill >/dev/null 2>&1; then
   pkill -f "${APP_DIR}/backend" >/dev/null 2>&1 || true
 fi
 
+# A systemd unit (often user "chatrix") respawns Node after kill. Stop that unit.
+if command -v systemctl >/dev/null 2>&1; then
+  pid="$(pgrep -n -f "${APP_DIR}/backend/src/index.js" || true)"
+  if [ -n "${pid}" ]; then
+    echo "==> Node pid ${pid} is still alive. Systemd unit:"
+    systemctl status "${pid}" --no-pager || true
+  fi
+  for unit in chatrix.service ChatrixCharitySystem.service chatrixcharitysystem.service; do
+    systemctl disable --now "${unit}" >/dev/null 2>&1 || true
+  done
+fi
+
 sleep 1
 
 echo
