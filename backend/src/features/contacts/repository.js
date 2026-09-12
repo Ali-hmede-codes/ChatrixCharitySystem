@@ -1,32 +1,26 @@
-import { createJsonStore } from "../../infrastructure/json-file.js";
 import { toWhatsAppDigits } from "../../shared/phone.js";
 
+// In-memory only — contacts are pushed to the WhatsApp phone's address
+// book (the device) and that is the single source of truth. Chatrix does
+// NOT keep a persisted list of saved contacts on the server; this cache only
+// lives for the current process so we can skip re-saving within a session
+// and show live progress in the UI. Nothing is written to disk.
 export function createContactRepository(ctx) {
-  const { CONTACTS_PATH, CONTACTS_SYNC_VERSION } = ctx.config;
-  const store = createJsonStore(CONTACTS_PATH, { syncVersion: CONTACTS_SYNC_VERSION, contacts: [] });
+  const { CONTACTS_SYNC_VERSION } = ctx.config;
+  let contacts = [];
 
   function load() {
-    const raw = store.read();
-    const list = Array.isArray(raw?.contacts) ? raw.contacts : Array.isArray(raw) ? raw : [];
-    const trustPrimary = Number(raw?.syncVersion) >= CONTACTS_SYNC_VERSION;
-    return list
-      .map((item) => {
-        const phone = toWhatsAppDigits(item?.phone);
-        const name = String(item?.name || "").trim();
-        if (!phone) return null;
-        return {
-          phone,
-          name: name || `+${phone}`,
-          savedAt: Number(item.savedAt) || Date.now(),
-          alreadyOnWhatsApp: Boolean(item.alreadyOnWhatsApp),
-          savedOnPrimary: trustPrimary && Boolean(item.savedOnPrimary),
-        };
-      })
-      .filter(Boolean);
+    return contacts.map((item) => ({
+      phone: toWhatsAppDigits(item.phone) || item.phone,
+      name: String(item.name || "").trim() || `+${item.phone}`,
+      savedAt: Number(item.savedAt) || Date.now(),
+      alreadyOnWhatsApp: Boolean(item.alreadyOnWhatsApp),
+      savedOnPrimary: Boolean(item.savedOnPrimary),
+    }));
   }
 
   async function write(list) {
-    await store.write({ syncVersion: CONTACTS_SYNC_VERSION, contacts: list });
+    contacts = Array.isArray(list) ? list : [];
   }
 
   function publicContact(item) {
@@ -40,16 +34,15 @@ export function createContactRepository(ctx) {
   }
 
   async function upsert(entry) {
-    const local = load();
-    const index = local.findIndex((item) => item.phone === entry.phone);
-    if (index >= 0) local[index] = { ...local[index], ...entry };
-    else local.push(entry);
-    await write(local);
+    const index = contacts.findIndex((item) => item.phone === entry.phone);
+    if (index >= 0) contacts[index] = { ...contacts[index], ...entry };
+    else contacts.push(entry);
   }
 
   function listPublic() {
-    return load().map(publicContact);
+    return contacts.map(publicContact);
   }
 
-  return { load, write, upsert, publicContact, listPublic };
+  // Kept for compatibility; syncVersion is meaningless without persistence.
+  return { load, write, upsert, publicContact, listPublic, syncVersion: CONTACTS_SYNC_VERSION };
 }

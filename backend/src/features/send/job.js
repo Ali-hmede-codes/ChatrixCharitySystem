@@ -303,7 +303,9 @@ export function createSendService(ctx) {
   async function sendOne(jid, message) {
     const client = ctx.services.whatsapp.getClient();
     if (!client || !ctx.services.whatsapp.isOpen()) {
-      throw new Error("WhatsApp is disconnected");
+      const err = new Error("WhatsApp is disconnected");
+      err.beforeSend = true;
+      throw err;
     }
     const typingMs = Math.min(4_000, Math.max(1_400, message.length * 22));
     try {
@@ -314,9 +316,20 @@ export function createSendService(ctx) {
     await waitGap(typingMs, isCancelled);
     if (sendJob.cancelled) return null;
     if (!ctx.services.whatsapp.isOpen()) {
-      throw new Error("WhatsApp is disconnected");
+      const err = new Error("WhatsApp is disconnected");
+      err.beforeSend = true;
+      throw err;
     }
-    const result = await withTimeout(client.message.send(jid, message), 45_000, "WhatsApp send timed out");
+    // From here on the send was attempted — even if this throws (timeout or
+    // disconnect mid-send), the message may already be on its way. Flag it so
+    // the caller marks "waiting" instead of "retry" to avoid a duplicate.
+    let result = null;
+    try {
+      result = await withTimeout(client.message.send(jid, message), 45_000, "WhatsApp send timed out");
+    } catch (error) {
+      error.sendAttempted = true;
+      throw error;
+    }
     try {
       await client.presence.sendChatstate(jid, { state: "paused" });
     } catch {
@@ -532,23 +545,43 @@ export function createSendService(ctx) {
       } catch (error) {
         if (isConnectionError(error) && !sendJob.cancelled) {
           pauseFromClose({ reason: "client_disconnected", fatal: false });
+          // If the send was already attempted (message may be on its way),
+          // mark "waiting" and track delivery instead of "retry" — this
+          // prevents re-sending the same person twice after a Wi-Fi drop.
+          // If it wasn't delivered, the delivery timer + SMS fallback cover it.
+          const sendAttempted = Boolean(error.sendAttempted);
+          const nextState = sendAttempted ? "waiting" : "retry";
+          const nextDetail = sendAttempted
+            ? "Sent, but the connection dropped before delivery was confirmed. Waiting for delivery / SMS fallback."
+            : "Network or WhatsApp dropped. Will retry this number.";
           if (campaign) {
             ctx.services.campaigns.updateRecipient(campaign.id, {
               phone,
-              state: "retry",
-              channel: "none",
-              detail: "Network or WhatsApp dropped. Will retry this number.",
+              state: nextState,
+              channel: sendAttempted ? "whatsapp" : "none",
+              detail: nextDetail,
               sentNames: recipient.sentNames,
             });
+            if (sendAttempted) {
+              delivery.trackDelivery(batch, {
+                phone,
+                messageId: null,
+                waitReason: "no_whatsapp_delivery",
+                text,
+              });
+            }
           }
           ctx.io.emit("send:progress", {
             index: globalIndex,
             total: sendJob.total,
             phone: `+${phone}`,
-            state: "retry",
-            detail: "Paused — will retry this number when WhatsApp is back.",
+            state: nextState,
+            detail: sendAttempted
+              ? "Paused — message sent, waiting for delivery confirmation."
+              : "Paused — will retry this number when WhatsApp is back.",
             campaignId: campaign?.id || null,
           });
+          if (sendAttempted) index += 1;
           continue;
         }
 
@@ -839,6 +872,25 @@ export function createSendService(ctx) {
   // Re-arm any "waiting" delivery timers lost during a restart. Deferred
   // to the next tick so all services and the socket bus are fully wired.
   setTimeout(recoverWaitingDeliveries, 1_500);
+
+  // Watchdog: if a send is paused (auto-resumable) but WhatsApp is actually
+  // open, un-pause it. This covers reconnects where the whatsapp:open event
+  // was missed or arrived out of order, so the user never has to click Resume.
+  setInterval(() => {
+    if (
+      sendJob.running &&
+      sendJob.paused &&
+      sendJob.autoResume &&
+      !sendJob.cancelled &&
+      ctx.services.whatsapp?.isOpen?.()
+    ) {
+      try {
+        onWhatsAppOpen();
+      } catch (error) {
+        ctx.logger.warn({ err: error }, "send watchdog auto-resume failed");
+      }
+    }
+  }, 3_000);
 
   return {
     start,
