@@ -574,6 +574,33 @@ export function AppProvider({ children }) {
         return;
       }
       if (event.undone) {
+        // Revert the person to "not collected" in the list right away. The
+        // backend also broadcasts `campaigns:recipient`, but if that event
+        // didn't refresh this particular row (e.g. a family member name
+        // mismatch), the confirm pane would still show "Undo collected" and
+        // the operator would think the undo didn't work. So apply the
+        // undone recipient directly here as a guaranteed fallback.
+        const r = event.recipient;
+        if (r && r.campaignId && r.phone) {
+          setPickupResults((current) => ({
+            ...current,
+            items: (current.items || []).map((item) => {
+              if (
+                item.campaignId !== r.campaignId ||
+                item.phone !== r.phone ||
+                !namesEqual(item.personName || item.name, r.personName || r.name)
+              ) {
+                return item;
+              }
+              return {
+                ...item,
+                takenAt: r.takenAt || null,
+                takenAidId: r.takenAidId || "",
+                printCount: r.printCount || 0,
+              };
+            }),
+          }));
+        }
         showToast("Marked as not collected. The same aid ID will be reused if they collect again.", "info");
         return;
       }
