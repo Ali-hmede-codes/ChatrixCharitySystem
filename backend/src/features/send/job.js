@@ -88,6 +88,14 @@ export function createSendService(ctx) {
     else ctx.io.emit(event, payload);
   }
 
+  // Minutes to wait for WhatsApp delivery before SMS fallback, from Settings.
+  function deliveryWaitMinutes() {
+    const ms = ctx.services.sms?.deliveryWaitMs?.();
+    const fallback = ctx.config.DELIVERY_WAIT_MS || 10 * 60_000;
+    const value = Number.isFinite(ms) && ms > 0 ? ms : fallback;
+    return Math.max(1, Math.round(value / 60_000));
+  }
+
   async function waitUntilCanSend() {
     while (sendJob.running && !sendJob.cancelled) {
       const open = Boolean(ctx.services.whatsapp?.isOpen?.());
@@ -168,6 +176,52 @@ export function createSendService(ctx) {
         ctx.logger.warn({ err: error }, "auto-resume failed");
       }
     }, 2_000);
+  }
+
+  // After a server restart, recipients that were "waiting" for WhatsApp
+  // delivery lost their in-memory SMS-fallback timers. Re-arm them so the
+  // configured wait still applies and SMS fallback still fires — entirely
+  // server-side, independent of any user connection.
+  let didRecoverWaiting = false;
+  function recoverWaitingDeliveries() {
+    if (didRecoverWaiting) return;
+    didRecoverWaiting = true;
+    try {
+      const batches = ctx.services.campaigns?.waitingRecipients?.() || [];
+      if (!batches.length) return;
+      const buildMessages = messageBuilder();
+      let reArmed = 0;
+      for (const b of batches) {
+        const body = String(b.sendOptions?.message || b.message || "").trim();
+        const extrasFor = (r) => ({
+          code: r.code,
+          useNameTemplate: Boolean(b.sendOptions?.useNameTemplate),
+          nameTemplate: String(b.sendOptions?.nameTemplate || ""),
+        });
+        const batch = delivery.createBatch(b.message, {
+          campaignId: b.campaignId,
+          enableSms: b.enableSms,
+        });
+        for (const r of b.recipients) {
+          const texts = buildMessages(r.names, body, extrasFor(r));
+          const text = texts.join("\n\n") || b.message;
+          delivery.trackDelivery(batch, {
+            phone: r.phone,
+            messageId: null,
+            waitReason: "no_whatsapp_delivery",
+            text,
+          });
+          reArmed += 1;
+        }
+      }
+      ctx.logger.info({ reArmed }, "re-armed waiting delivery timers after restart");
+      ctx.io.emit(
+        "send:notice",
+        `Server restarted — ${reArmed} message${reArmed === 1 ? "" : "s"} still waiting for WhatsApp delivery. SMS fallback will fire automatically if not delivered in time.`
+      );
+    } catch (error) {
+      ctx.logger.warn({ err: error }, "recover waiting deliveries failed");
+    }
   }
 
   function normalizeRecipients(incoming, extraNumbers) {
@@ -303,7 +357,7 @@ export function createSendService(ctx) {
       if (perPerson && alreadySent.length && !pendingNames.length) {
         sendJob.sent += 1;
         const waitingDetail = enableSms
-          ? "Sent · waiting 10 minutes for delivery (SMS fallback active)"
+          ? `Sent · waiting ${deliveryWaitMinutes()} minutes for delivery (SMS fallback active)`
           : "Sent · waiting for delivery (SMS off for this campaign)";
         ctx.io.emit("send:progress", {
           index: globalIndex,
@@ -368,7 +422,7 @@ export function createSendService(ctx) {
         if (target.skip) {
           sendJob.skipped += 1;
           const smsHint = enableSms
-            ? " · waiting 10 min, then SMS if still undelivered"
+            ? ` · waiting ${deliveryWaitMinutes()} min, then SMS if still undelivered`
             : " · not on WhatsApp (SMS off for this campaign)";
           const skipDetail = `${target.reason}${smsHint}`;
           ctx.io.emit("send:progress", {
@@ -454,7 +508,7 @@ export function createSendService(ctx) {
           sendJob.sent += 1;
           delivery.trackDelivery(batch, { phone, messageId: lastResult?.id, waitReason: "sent", text });
           const waitingDetail = enableSms
-            ? "Sent · waiting 10 minutes for delivery (SMS fallback active)"
+            ? `Sent · waiting ${deliveryWaitMinutes()} minutes for delivery (SMS fallback active)`
             : "Sent · waiting for delivery (SMS off for this campaign)";
           ctx.io.emit("send:progress", {
             index: globalIndex,
@@ -500,7 +554,7 @@ export function createSendService(ctx) {
 
         sendJob.failed += 1;
         const failDetail = enableSms
-          ? `${error.message || "Could not send"} · waiting 10 min, then SMS`
+          ? `${error.message || "Could not send"} · waiting ${deliveryWaitMinutes()} min, then SMS`
           : `${error.message || "Could not send"} (SMS off for this campaign)`;
         ctx.io.emit("send:progress", {
           index: globalIndex,
@@ -781,6 +835,10 @@ export function createSendService(ctx) {
       ctx.io.emit("send:resumable", resumable);
     }
   }
+
+  // Re-arm any "waiting" delivery timers lost during a restart. Deferred
+  // to the next tick so all services and the socket bus are fully wired.
+  setTimeout(recoverWaitingDeliveries, 1_500);
 
   return {
     start,

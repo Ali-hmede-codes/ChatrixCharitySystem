@@ -11,6 +11,7 @@ const AppContext = createContext(null);
 export function AppProvider({ children }) {
   const socketRef = useRef(null);
   const hadConnectionRef = useRef(false);
+  const smsSettingsRef = useRef(null);
   const [socketConnected, setSocketConnected] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -28,6 +29,7 @@ export function AppProvider({ children }) {
     from: "",
     apiKeyMasked: "",
     ready: false,
+    deliveryWaitMinutes: 10,
   });
   const [messageSettings, setMessageSettings] = useState({
     useNameTemplate: false,
@@ -301,7 +303,7 @@ export function AppProvider({ children }) {
           : 100,
         stepText: event.resumable
           ? `Paused with ${event.remaining} remaining. Resume when WhatsApp is linked.`
-          : `${event.stopped ? "Stopped. " : "Finished. "}${event.sent} sent · ${event.failed} failed · ${event.skipped || 0} skipped. Waiting 10 minutes for WhatsApp delivery.`,
+          : `${event.stopped ? "Stopped. " : "Finished. "}${event.sent} sent · ${event.failed} failed · ${event.skipped || 0} skipped. Waiting ${smsSettingsRef.current?.deliveryWaitMinutes || 10} minutes for WhatsApp delivery.`,
         deliverySummary: event.delivery || prev.deliverySummary,
       }));
       if (event.resumable && event.stopped) {
@@ -354,7 +356,10 @@ export function AppProvider({ children }) {
     });
 
     // SMS & Message & Brand settings
-    socket.on("sms:settings", (data) => setSmsSettings(data));
+    socket.on("sms:settings", (data) => {
+      smsSettingsRef.current = data;
+      setSmsSettings(data);
+    });
     socket.on("wa:reset:done", () => {
       setDisconnecting(false);
       showToast("WhatsApp session cleared. Scan the new QR code.", "success");

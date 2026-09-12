@@ -7,8 +7,15 @@ export function createSmsService(ctx) {
   const { SMS_SETTINGS_PATH, SMS_SEND_URL, SMS_GAP_MS } = ctx.config;
   const store = createJsonStore(SMS_SETTINGS_PATH, { enabled: false, apiKey: "", from: "" });
   const queue = [];
-  let settings = { enabled: false, apiKey: "", from: "" };
+  let settings = { enabled: false, apiKey: "", from: "", deliveryWaitMinutes: 10 };
   let busy = false;
+
+  function clampMinutes(value) {
+    const n = Math.trunc(Number(value));
+    if (!Number.isFinite(n) || n < 1) return 10;
+    if (n > 120) return 120;
+    return n;
+  }
 
   function load() {
     const raw = store.read();
@@ -16,6 +23,7 @@ export function createSmsService(ctx) {
       enabled: Boolean(raw?.enabled),
       apiKey: String(raw?.apiKey || "").trim(),
       from: normalizeFromNumber(raw?.from),
+      deliveryWaitMinutes: clampMinutes(raw?.deliveryWaitMinutes ?? 10),
     };
     return settings;
   }
@@ -25,11 +33,16 @@ export function createSmsService(ctx) {
       enabled: Boolean(settings.enabled),
       apiKey: settings.apiKey,
       from: settings.from,
+      deliveryWaitMinutes: settings.deliveryWaitMinutes,
     });
   }
 
   function ready() {
     return Boolean(settings.enabled && settings.apiKey && settings.from);
+  }
+
+  function deliveryWaitMs() {
+    return Math.max(1, Number(settings.deliveryWaitMinutes) || 10) * 60_000;
   }
 
   function publicSettings() {
@@ -39,6 +52,7 @@ export function createSmsService(ctx) {
       from: settings.from || "",
       apiKeyMasked: maskApiKey(settings.apiKey),
       ready: ready(),
+      deliveryWaitMinutes: Number(settings.deliveryWaitMinutes) || 10,
     };
   }
 
@@ -102,6 +116,7 @@ export function createSmsService(ctx) {
       enabled,
       apiKey: nextKey || settings.apiKey,
       from: fromDigits ? `+${fromDigits}` : "",
+      deliveryWaitMinutes: clampMinutes(payload?.deliveryWaitMinutes ?? settings.deliveryWaitMinutes),
     };
     try {
       await write();
@@ -109,7 +124,7 @@ export function createSmsService(ctx) {
       socket.emit(
         "sms:saved",
         ready()
-          ? "SMS fallback is on. Undelivered WhatsApp numbers will get the same message by SMS."
+          ? `SMS fallback is on. Undelivered WhatsApp numbers will get the same message by SMS after ${settings.deliveryWaitMinutes} minutes.`
           : enabled
             ? "Saved, but SMS will not send until the API key and From number are set."
             : "SMS fallback is off."
@@ -130,5 +145,6 @@ export function createSmsService(ctx) {
     send,
     enqueue,
     isEnabled: () => Boolean(settings.enabled),
+    deliveryWaitMs,
   };
 }

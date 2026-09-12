@@ -62,6 +62,15 @@ export function createDeliveryTracker(ctx) {
     return sms.send({ phone: item.phone, text: item.text || batch.message });
   }
 
+  function deliveryWaitMs() {
+    const configured = ctx.services.sms?.deliveryWaitMs?.();
+    return Number.isFinite(configured) && configured > 0 ? configured : ctx.config.DELIVERY_WAIT_MS;
+  }
+
+  function deliveryWaitMinutes() {
+    return Math.max(1, Math.round(deliveryWaitMs() / 60_000));
+  }
+
   function settleItem(batch, item, status, detail) {
     if (!batch || !item || item.settled) return;
     item.settled = true;
@@ -125,6 +134,8 @@ export function createDeliveryTracker(ctx) {
     batch.items.push(item);
     batch.pending += 1;
     if (messageId) outboundById.set(String(messageId), { batch, item });
+    const waitMs = deliveryWaitMs();
+    const waitMin = deliveryWaitMinutes();
     item.timer = setTimeout(() => {
       if (item.settled) return;
       const reason = item.waitReason === "sent" ? "no_whatsapp_delivery" : item.waitReason;
@@ -147,8 +158,8 @@ export function createDeliveryTracker(ctx) {
               item,
               "sms-queued",
               ctx.services.sms?.isEnabled?.()
-                ? "Not delivered in 10 minutes · SMS is not fully configured"
-                : "Not delivered in 10 minutes · SMS fallback is off"
+                ? `Not delivered in ${waitMin} minutes · SMS is not fully configured`
+                : `Not delivered in ${waitMin} minutes · SMS fallback is off`
             );
             return;
           }
@@ -168,7 +179,7 @@ export function createDeliveryTracker(ctx) {
             settleItem(batch, item, "sms-failed", "Not delivered on WhatsApp · SMS failed");
           }
         });
-    }, ctx.config.DELIVERY_WAIT_MS);
+    }, waitMs);
     return item;
   }
 

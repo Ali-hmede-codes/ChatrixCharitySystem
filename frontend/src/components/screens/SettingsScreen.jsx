@@ -31,6 +31,7 @@ export function SettingsScreen() {
   const [smsEnabled, setSmsEnabled] = useState(smsSettings.enabled);
   const [smsApiKey, setSmsApiKey] = useState("");
   const [smsFrom, setSmsFrom] = useState(smsSettings.from || "");
+  const [smsWaitMinutes, setSmsWaitMinutes] = useState(smsSettings.deliveryWaitMinutes || 10);
   const [paperWidthMm, setPaperWidthMm] = useState(printerSettings.paperWidthMm || 80);
   const [headerText, setHeaderText] = useState(printerSettings.headerText || "");
 
@@ -42,7 +43,8 @@ export function SettingsScreen() {
   useEffect(() => {
     setSmsEnabled(Boolean(smsSettings.enabled));
     setSmsFrom(smsSettings.from || "");
-  }, [smsSettings.enabled, smsSettings.from]);
+    setSmsWaitMinutes(Number(smsSettings.deliveryWaitMinutes) || 10);
+  }, [smsSettings.enabled, smsSettings.from, smsSettings.deliveryWaitMinutes]);
 
   const fromPreview = normalizePhone(smsFrom);
   const fromIssue = describePhoneIssue(smsFrom);
@@ -69,6 +71,7 @@ export function SettingsScreen() {
       enabled: smsEnabled,
       apiKey: smsApiKey.trim(),
       from: smsFrom.trim(),
+      deliveryWaitMinutes: Number(smsWaitMinutes) || 10,
     });
     setSmsApiKey("");
   }
@@ -268,7 +271,7 @@ export function SettingsScreen() {
                   <h3 className="checklist-title">Automatic SMS Fallback (httpSMS)</h3>
                   <p className="checklist-desc">
                     {smsSettings.ready
-                      ? "Active. Undelivered WhatsApp messages will automatically send as standard SMS after 10 minutes."
+                      ? `Active. Undelivered WhatsApp messages will automatically send as standard SMS after ${smsSettings.deliveryWaitMinutes || 10} minutes.`
                       : "Ensures beneficiaries who have no internet access still receive your outreach via cellular SMS."}
                   </p>
                 </div>
@@ -315,7 +318,7 @@ export function SettingsScreen() {
             <div className={`sms-config-status ${smsSettings.ready ? "is-ready" : "is-blocked"}`}>
               {smsSettings.ready ? (
                 <>
-                  <strong>SMS is configured.</strong> Campaigns may use 10-minute SMS fallback.
+                  <strong>SMS is configured.</strong> Campaigns may use {smsSettings.deliveryWaitMinutes || 10}-minute SMS fallback.
                 </>
               ) : (
                 <>
@@ -334,7 +337,7 @@ export function SettingsScreen() {
                 <li>Install the free <strong>httpSMS</strong> app on your charity Android phone with an active SIM card.</li>
                 <li>Copy your API key from <strong>httpsms.com/settings</strong>.</li>
                 <li>Enter the API key and phone number (+961 or +963 format) below.</li>
-                <li>When any WhatsApp message remains undelivered for 10 minutes, Chatrix automatically triggers an SMS to that number.</li>
+                <li>When any WhatsApp message remains undelivered for {smsSettings.deliveryWaitMinutes || 10} minutes, Chatrix automatically triggers an SMS to that number.</li>
               </ul>
             </div>
 
@@ -350,7 +353,7 @@ export function SettingsScreen() {
               </label>
               <div className="switch-label-wrap">
                 <span className="switch-title">Enable Automatic SMS Fallback</span>
-                <span className="switch-hint">Triggers an SMS if a recipient has no WhatsApp delivery after 10 minutes</span>
+                <span className="switch-hint">Triggers an SMS if a recipient has no WhatsApp delivery after {smsSettings.deliveryWaitMinutes || 10} minutes</span>
               </div>
             </div>
 
@@ -396,6 +399,26 @@ export function SettingsScreen() {
               {!smsFrom.trim() && (
                 <span className="form-hint">Must match the phone number with the SIM card in the httpSMS app.</span>
               )}
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="sms-wait-input">
+                Wait before SMS fallback (minutes)
+              </label>
+              <input
+                id="sms-wait-input"
+                type="number"
+                min="1"
+                max="120"
+                step="1"
+                className="form-input"
+                value={smsWaitMinutes}
+                onChange={(e) => setSmsWaitMinutes(Math.max(1, Math.min(120, Number(e.target.value) || 10)))}
+              />
+              <span className="form-hint">
+                How long to wait for WhatsApp delivery before sending SMS. 1–120 minutes. Default 10.
+                Applies to every campaign — even with SMS off, a number is marked undelivered after this time.
+              </span>
             </div>
 
             <div className="form-actions">

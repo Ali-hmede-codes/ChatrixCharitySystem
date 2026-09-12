@@ -670,7 +670,7 @@ export function SendScreen() {
                             {!smsReady
                               ? "You cannot send SMS until httpSMS is fully configured: turn it on, paste the API key, and enter a valid +961 or +963 sender number in Settings & SMS."
                               : enableSms
-                              ? "If a WhatsApp message isn't confirmed delivered within 10 minutes or the recipient is not on WhatsApp, httpSMS will automatically send via cellular SMS."
+                              ? `If a WhatsApp message isn't confirmed delivered within ${smsSettings.deliveryWaitMinutes || 10} minutes or the recipient is not on WhatsApp, httpSMS will automatically send via cellular SMS.`
                               : "No cellular SMS will be sent for this campaign. Beneficiaries without WhatsApp or with delays will be skipped to save SMS credits."}
                           </p>
                         </div>
@@ -795,7 +795,7 @@ export function SendScreen() {
                         <strong className="metric-num text-amber-700">
                           {deliverySummary.waiting || 0}
                         </strong>
-                        <span className="metric-label">Waiting (10 min check)</span>
+                        <span className="metric-label">Waiting ({smsSettings.deliveryWaitMinutes || 10} min check)</span>
                       </div>
                       <div className="metric-box border-rose-500">
                         <strong className="metric-num text-rose-700">

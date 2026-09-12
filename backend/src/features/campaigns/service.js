@@ -325,6 +325,31 @@ export function createCampaignService(ctx) {
     return list().filter((c) => c.resumable);
   }
 
+  // Return recipients that are in the "waiting" state (message sent, awaiting
+  // delivery) grouped by campaign. Used by the send service to re-arm the
+  // SMS-fallback timers after a server restart, since those timers live only
+  // in memory and would otherwise be lost.
+  function waitingRecipients() {
+    const out = [];
+    for (const c of campaigns) {
+      const waiters = (c.recipients || []).filter((r) => r.state === "waiting");
+      if (!waiters.length) continue;
+      out.push({
+        campaignId: c.id,
+        enableSms: Boolean(c.enableSms),
+        message: String(c.message || ""),
+        sendOptions: c.sendOptions || {},
+        recipients: waiters.map((r) => ({
+          phone: r.phone,
+          names: namesFromRecipient(r),
+          name: r.name || "",
+          code: r.code || "",
+        })),
+      });
+    }
+    return out;
+  }
+
   function get(id) {
     const found = campaigns.find((c) => c.id === String(id));
     if (!found) return null;
@@ -1055,6 +1080,7 @@ export function createCampaignService(ctx) {
   return {
     list,
     listResumable,
+    waitingRecipients,
     get,
     create,
     update: updateCampaign,
