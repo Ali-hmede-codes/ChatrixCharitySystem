@@ -18,6 +18,24 @@ import {
   IconUsers,
   IconSpreadsheet,
 } from "../common/Icons.jsx";
+import { Skeleton } from "../common/Skeleton.jsx";
+
+function PickupListSkeleton({ rows = 6 }) {
+  return (
+    <div className="pickup-skeleton-list" aria-label="Loading list">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div className="pickup-result-row is-skeleton" key={i}>
+          <Skeleton className="skeleton-circle" width="38px" height="38px" />
+          <div className="pickup-result-copy">
+            <Skeleton className="skeleton-line" width="55%" height="13px" />
+            <Skeleton className="skeleton-line" width="75%" height="10px" />
+          </div>
+          <Skeleton width="64px" height="20px" rounded="999px" />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function PickupScreen() {
   const {
@@ -28,6 +46,7 @@ export function PickupScreen() {
     reprintPickup,
     undoPickup,
     pickupBusy,
+    pickupLoading,
     printerSettings,
     campaigns = [],
     socketConnected,
@@ -333,7 +352,9 @@ export function PickupScreen() {
             </div>
 
             <div className="pickup-results-list">
-              {items.length === 0 ? (
+              {pickupLoading && items.length === 0 ? (
+                <PickupListSkeleton />
+              ) : items.length === 0 ? (
                 <div className="empty-table-view pickup-empty">
                   <IconUsers className="w-8 h-8 text-slate-400 mb-2" />
                   <p>{emptyCopy()}</p>

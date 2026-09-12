@@ -14,6 +14,53 @@ import {
   IconUsers,
   IconX,
 } from "../common/Icons.jsx";
+import { Skeleton } from "../common/Skeleton.jsx";
+
+function CampaignCardSkeleton() {
+  return (
+    <div className="campaign-record-card is-skeleton">
+      <div className="campaign-card-header">
+        <div className="campaign-select">
+          <Skeleton className="skeleton-circle" width="18px" height="18px" />
+          <div className="campaign-card-skel-title">
+            <Skeleton className="skeleton-line" width="60%" height="14px" />
+            <Skeleton className="skeleton-line" width="40%" height="10px" />
+          </div>
+        </div>
+        <div className="campaign-card-badges">
+          <Skeleton width="70px" height="20px" rounded="999px" />
+        </div>
+      </div>
+      <div className="campaign-stats-strip">
+        {[0, 1, 2, 3].map((i) => (
+          <div className="strip-metric-item" key={i}>
+            <Skeleton className="skeleton-line" width="50px" height="9px" />
+            <Skeleton className="skeleton-line" width="30px" height="14px" />
+          </div>
+        ))}
+      </div>
+      <div className="campaign-message-snippet">
+        <Skeleton className="skeleton-line" width="100%" height="10px" />
+        <Skeleton className="skeleton-line" width="80%" height="10px" />
+      </div>
+      <div className="campaign-card-actions">
+        <Skeleton width="70px" height="28px" rounded="6px" />
+        <Skeleton width="70px" height="28px" rounded="6px" />
+        <Skeleton width="28px" height="28px" rounded="6px" />
+      </div>
+    </div>
+  );
+}
+
+function CampaignsGridSkeleton({ cards = 4 }) {
+  return (
+    <div className="campaigns-grid-container" aria-label="Loading campaigns">
+      {Array.from({ length: cards }).map((_, i) => (
+        <CampaignCardSkeleton key={i} />
+      ))}
+    </div>
+  );
+}
 
 function statusLabel(campaign) {
   if (campaign.status === "running") return "Running";
@@ -32,6 +79,7 @@ function statusChip(campaign) {
 export function CampaignsScreen() {
   const {
     campaigns,
+    campaignsLoading,
     sendJob,
     smsSettings,
     deleteCampaigns,
@@ -333,7 +381,9 @@ export function CampaignsScreen() {
           </div>
         </div>
 
-        {filtered.length === 0 ? (
+        {campaignsLoading && campaigns.length === 0 ? (
+          <CampaignsGridSkeleton />
+        ) : filtered.length === 0 ? (
           <div className="empty-campaigns-view">
             <IconHistory className="w-10 h-10 text-slate-400 mb-2" />
             <h3>{campaigns.length === 0 ? "No campaigns yet" : "No campaigns match"}</h3>

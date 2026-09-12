@@ -62,8 +62,14 @@ export function AppProvider({ children }) {
   const [campaigns, setCampaigns] = useState([]);
   const [activeCampaignDetails, setActiveCampaignDetails] = useState(null);
   const [loadingCampaignDetails, setLoadingCampaignDetails] = useState(false);
+  // True until the first batch of campaign data arrives (or refresh after a
+  // reconnect). Drives the skeleton loader on the Campaigns screen.
+  const [campaignsLoading, setCampaignsLoading] = useState(true);
   const [pickupBusy, setPickupBusy] = useState(false);
   const pickupBusyRef = useRef(false);
+  // True while a pickup search is in flight. Drives the skeleton loader on
+  // the Pickup screen so a slow connection shows shimmer rows, not a freeze.
+  const [pickupLoading, setPickupLoading] = useState(false);
   const [pickupResults, setPickupResults] = useState({
     query: "",
     scope: "today",
@@ -138,6 +144,7 @@ export function AppProvider({ children }) {
 
     socket.on("connect", () => {
       setSocketConnected(true);
+      setCampaignsLoading(true);
       socket.emit("contacts:list");
       socket.emit("sms:get");
       socket.emit("message:get");
@@ -155,6 +162,7 @@ export function AppProvider({ children }) {
       setSocketConnected(false);
       pickupBusyRef.current = false;
       setPickupBusy(false);
+      setPickupLoading(false);
       showToast("Lost connection to Chatrix. Your campaigns stay saved. Reconnecting…", "warning");
     });
 
@@ -388,6 +396,7 @@ export function AppProvider({ children }) {
     // Campaigns & Stats
     socket.on("campaigns:data", (data) => {
       setCampaigns(Array.isArray(data?.campaigns) ? data.campaigns : []);
+      setCampaignsLoading(false);
     });
 
     socket.on("campaigns:update", (updated) => {
@@ -513,6 +522,7 @@ export function AppProvider({ children }) {
         total: data?.total || 0,
         items: Array.isArray(data?.items) ? data.items : [],
       });
+      setPickupLoading(false);
     });
 
     socket.on("pickup:export-data", (data) => {
@@ -736,6 +746,7 @@ export function AppProvider({ children }) {
 
   function searchPickup(payload = {}) {
     if (!socketRef.current) return;
+    setPickupLoading(true);
     socketRef.current.emit("pickup:search", payload);
   }
 
@@ -824,6 +835,7 @@ export function AppProvider({ children }) {
     setListColumns,
     sendJob,
     campaigns,
+    campaignsLoading,
     resumableCampaigns,
     activeCampaignDetails,
     loadingCampaignDetails,
@@ -835,6 +847,7 @@ export function AppProvider({ children }) {
     removeCampaignRecipients,
     mergeCampaigns,
     pickupBusy,
+    pickupLoading,
     pickupResults,
     searchPickup,
     exportCollected,

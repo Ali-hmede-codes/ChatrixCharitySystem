@@ -49,6 +49,54 @@
 }
 
 /* ==========================================================================
+   Skeleton loading (shimmer placeholders) — shown while lists load over a
+   slow connection so the UI feels responsive instead of empty/frozen.
+   ========================================================================== */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--slate-200);
+  border-radius: 6px;
+  display: block;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.65),
+    transparent
+  );
+  animation: skeleton-shimmer 1.4s infinite;
+}
+.skeleton-circle {
+  border-radius: 50%;
+}
+.skeleton-line {
+  height: 10px;
+}
+.skeleton-text-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
    CSS Reset & Base
    ========================================================================== */
 * {
@@ -3087,6 +3135,20 @@ svg {
   border-color: #cbd5e1;
 }
 
+.campaign-record-card.is-skeleton,
+.campaign-record-card.is-skeleton:hover {
+  border-color: var(--border-subtle);
+  cursor: default;
+  pointer-events: none;
+}
+
+.campaign-card-skel-title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
 .campaign-card-header {
   display: flex;
   align-items: flex-start;
@@ -4128,6 +4190,13 @@ svg {
 
 .pickup-result-row > .chip-badge {
   flex-shrink: 0;
+}
+
+.pickup-result-row.is-skeleton,
+.pickup-result-row.is-skeleton:hover {
+  background: #ffffff;
+  cursor: default;
+  pointer-events: none;
 }
 
 .pickup-date-row {
