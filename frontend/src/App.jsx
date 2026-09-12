@@ -5,7 +5,6 @@ import { ConnectionBanner } from "./components/layout/ConnectionBanner.jsx";
 import { MobileTopBar, NavOverlay, MobileBottomNav } from "./components/layout/MobileChrome.jsx";
 import { BootScreen } from "./components/screens/BootScreen.jsx";
 import { AuthScreen } from "./components/screens/AuthScreen.jsx";
-import { ContactsScreen } from "./components/screens/ContactsScreen.jsx";
 import { SettingsScreen } from "./components/screens/SettingsScreen.jsx";
 import { SendingMessagesScreen } from "./components/screens/SendingMessagesScreen.jsx";
 import { PickupScreen } from "./components/screens/PickupScreen.jsx";
@@ -43,7 +42,6 @@ export function App() {
           {isWorkflow && <SendingMessagesScreen />}
           {currentStep === "pickup" && <PickupScreen />}
           {currentStep === "campaigns" && <CampaignsScreen />}
-          {currentStep === "contacts" && <ContactsScreen />}
           {currentStep === "settings" && <SettingsScreen />}
         </main>
       </div>

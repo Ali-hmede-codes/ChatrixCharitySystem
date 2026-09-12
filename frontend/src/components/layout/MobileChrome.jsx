@@ -3,7 +3,6 @@ import { useApp } from "../../context/AppContext.jsx";
 import {
   IconMenu,
   IconSend,
-  IconPhone,
   IconSettings,
   IconShield,
   IconTicket,
@@ -93,13 +92,6 @@ export function MobileBottomNav() {
       icon: <IconTicket className="w-5 h-5" />,
       active: currentStep === "pickup",
       onClick: () => setCurrentStep("pickup"),
-    },
-    {
-      id: "contacts",
-      label: "Contacts",
-      icon: <IconPhone className="w-5 h-5" />,
-      active: currentStep === "contacts",
-      onClick: () => setCurrentStep("contacts"),
     },
     {
       id: "auth",

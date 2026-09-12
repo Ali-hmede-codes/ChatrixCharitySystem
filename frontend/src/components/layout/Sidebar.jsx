@@ -2,7 +2,6 @@ import React from "react";
 import { useApp } from "../../context/AppContext.jsx";
 import {
   IconSend,
-  IconPhone,
   IconSettings,
   IconMessage,
   IconLogOut,
@@ -19,7 +18,6 @@ export function Sidebar() {
     currentStep,
     setCurrentStep,
     people,
-    savedContacts,
     waState,
     waPhone,
     disconnecting,
@@ -48,13 +46,6 @@ export function Sidebar() {
   const isSendingsActive = ["excel", "list", "send", "sending"].includes(currentStep);
 
   const managementItems = [
-    {
-      id: "contacts",
-      label: "Contacts Directory",
-      icon: <IconPhone className="w-4 h-4" />,
-      badge: savedContacts.length > 0 ? String(savedContacts.length) : null,
-      disabled: false,
-    },
     {
       id: "settings",
       label: "Settings & SMS",
