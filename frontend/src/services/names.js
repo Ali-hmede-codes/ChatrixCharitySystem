@@ -38,6 +38,24 @@ export function namesEqual(a, b) {
   );
 }
 
+const FAMILY_COUNT_SUFFIX = /\s*\+\s*\d+\s*$/;
+
+function stripFamilyCountSuffix(value) {
+  return String(value || "").replace(FAMILY_COUNT_SUFFIX, "").replace(/\s+/g, " ").trim();
+}
+
+function splitNameField(value) {
+  const raw = stripFamilyCountSuffix(value);
+  if (!raw) return [];
+  if (/\s*\+\s*/.test(raw)) {
+    return raw
+      .split(/\s*\+\s*/)
+      .map((name) => name.trim())
+      .filter((name) => name && !/^\d+$/.test(name));
+  }
+  return /^\d+$/.test(raw) ? [] : [raw];
+}
+
 export function personNames(item) {
   const rawList =
     Array.isArray(item?.names) && item.names.length
@@ -45,19 +63,20 @@ export function personNames(item) {
       : [String(item?.name || "")];
   const split = [];
   for (const value of rawList) {
-    const raw = String(value || "").replace(/\s+/g, " ").trim();
-    if (!raw) continue;
-    if (/\s*\+\s*/.test(raw)) {
-      split.push(...raw.split(/\s*\+\s*/).map((name) => name.trim()).filter(Boolean));
-    } else {
-      split.push(raw);
-    }
+    split.push(...splitNameField(value));
   }
   const unique = [];
   for (const name of split) {
     if (!unique.some((existing) => namesEqual(existing, name))) unique.push(name);
   }
   return unique;
+}
+
+export function contactSaveName(item) {
+  const names = personNames(item);
+  if (names.length >= 2) return `${names[0]} +${names.length}`;
+  if (names.length === 1) return names[0];
+  return stripFamilyCountSuffix(item?.name);
 }
 
 export function addPersonName(person, newName) {
@@ -68,10 +87,7 @@ export function addPersonName(person, newName) {
     person.names = personNames(person);
   }
 
-  // Handle if newName itself contains multiple names separated by '+'
-  const incoming = /\s*\+\s*/.test(clean)
-    ? clean.split(/\s*\+\s*/).map((s) => s.trim()).filter(Boolean)
-    : [clean];
+  const incoming = splitNameField(clean);
 
   for (const name of incoming) {
     if (!person.names.some((existing) => namesEqual(existing, name))) {
@@ -87,24 +103,24 @@ export function applyPersonNameTemplate(template, name) {
   return String(template || "").replace(/\[PersonName\]/gi, name);
 }
 
-export function buildPreviewMessage(item, bodyText, messageConfig, extras = {}) {
+function buildOnePreviewMessage(names, bodyText, messageConfig, extras = {}) {
   const body = String(bodyText || "").trim();
-  const names = personNames(item);
-  const code = resolveAidCode(item, extras.code);
+  const nameList = Array.isArray(names) ? names.filter(Boolean) : [];
+  const code = resolveAidCode(extras.item, extras.code);
   let result = body;
 
   if (messageConfig?.useNameTemplate) {
     const template =
       String(messageConfig?.template || DEFAULT_NAME_TEMPLATE).trim() ||
       DEFAULT_NAME_TEMPLATE;
-    if (names.length) {
-      const greetings = names
+    if (nameList.length) {
+      const greetings = nameList
         .map((name) => applyPersonNameTemplate(template, name).trim())
         .filter(Boolean);
 
       if (!body) result = greetings.join("\n");
       else if (/\[PersonName\]/i.test(body)) {
-        result = names
+        result = nameList
           .map((name) => applyPersonNameTemplate(body, name).trim())
           .filter(Boolean)
           .join("\n\n");
@@ -112,14 +128,32 @@ export function buildPreviewMessage(item, bodyText, messageConfig, extras = {}) 
         result = greetings.join("\n") + "\n\n" + body;
       }
     }
-  } else if (names.length && /\[PersonName\]/i.test(body)) {
-    result = names
+  } else if (nameList.length && /\[PersonName\]/i.test(body)) {
+    result = nameList
       .map((name) => applyPersonNameTemplate(body, name).trim())
       .filter(Boolean)
       .join("\n\n");
   }
 
   return applyCodePlaceholder(result, code);
+}
+
+export function buildPreviewMessages(item, bodyText, messageConfig, extras = {}) {
+  const names = personNames(item);
+  const personalized =
+    Boolean(messageConfig?.useNameTemplate) || /\[PersonName\]/i.test(String(bodyText || ""));
+  const payload = { ...extras, item };
+  if (personalized && names.length > 1) {
+    return names
+      .map((name) => buildOnePreviewMessage([name], bodyText, messageConfig, payload))
+      .filter(Boolean);
+  }
+  const one = buildOnePreviewMessage(names, bodyText, messageConfig, payload);
+  return one ? [one] : [];
+}
+
+export function buildPreviewMessage(item, bodyText, messageConfig, extras = {}) {
+  return buildPreviewMessages(item, bodyText, messageConfig, extras).join("\n\n") || "";
 }
 
 export function personInitials(name, phone) {

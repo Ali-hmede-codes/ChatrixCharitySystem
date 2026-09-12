@@ -1,9 +1,11 @@
 import { jitter, waitGap, delay, withTimeout } from "../../shared/delay.js";
 import {
   namesFromRecipient,
+  namesEqual,
   sanitizeAidCode,
   messageHasCodePlaceholder,
   messageHasNamePlaceholder,
+  shouldSendPerPerson,
 } from "../../shared/names.js";
 import { toWhatsAppDigits } from "../../shared/phone.js";
 import { createDeliveryTracker } from "./delivery.js";
@@ -143,6 +145,7 @@ export function createSendService(ctx) {
         names: namesFromRecipient(item),
         name: String(item?.name || "").trim(),
         code: sanitizeAidCode(item?.code),
+        sentNames: Array.isArray(item?.sentNames) ? item.sentNames : [],
       });
       if (recipients.length >= ctx.config.MAX_PEOPLE) break;
     }
@@ -158,19 +161,34 @@ export function createSendService(ctx) {
     return recipients;
   }
 
+  function messageBuilder() {
+    return (
+      ctx.services.messages?.buildRecipientMessages ||
+      ((names, text, extras) => {
+        const buildOne =
+          ctx.services.messages?.buildRecipientMessage ||
+          ((_names, body, extra) => {
+            const next = String(body || "").trim();
+            return extra?.code ? next.replace(/\[(?:Aid)?Code\]|\[كود\]/gi, extra.code) : next;
+          });
+        if (shouldSendPerPerson(names, text, extras)) {
+          return (names || []).map((name) => buildOne([name], text, extras)).filter(Boolean);
+        }
+        const one = buildOne(names, text, extras);
+        return one ? [one] : [];
+      })
+    );
+  }
+
   function validateMessages(recipients, body, extrasFor) {
-    const buildMessage =
-      ctx.services.messages?.buildRecipientMessage ||
-      ((_names, text, extras) => {
-        const next = String(text || "").trim();
-        return extras?.code ? next.replace(/\[(?:Aid)?Code\]|\[كود\]/gi, extras.code) : next;
-      });
-    const sampleText = buildMessage(recipients[0].names, body, extrasFor(recipients[0]));
+    const buildMessages = messageBuilder();
+    const sampleTexts = buildMessages(recipients[0].names, body, extrasFor(recipients[0]));
+    const sampleText = sampleTexts[0] || "";
     if (!sampleText) {
       return { error: "Write a message first, or pick a template on the Compose screen." };
     }
     const leftoverName = recipients.some((r) =>
-      messageHasNamePlaceholder(buildMessage(r.names, body, extrasFor(r)))
+      buildMessages(r.names, body, extrasFor(r)).some((text) => messageHasNamePlaceholder(text))
     );
     if (leftoverName) {
       return {
@@ -179,7 +197,7 @@ export function createSendService(ctx) {
       };
     }
     const leftoverCode = recipients.some((r) =>
-      messageHasCodePlaceholder(buildMessage(r.names, body, extrasFor(r)))
+      buildMessages(r.names, body, extrasFor(r)).some((text) => messageHasCodePlaceholder(text))
     );
     if (leftoverCode) {
       return {
@@ -187,7 +205,7 @@ export function createSendService(ctx) {
           "The message includes [Code] but some recipients have no pickup code. Select a Code column when importing Excel, or pick a template without [Code].",
       };
     }
-    return { buildMessage, sampleText };
+    return { buildMessages, sampleText };
   }
 
   async function sendOne(jid, message) {
@@ -215,7 +233,7 @@ export function createSendService(ctx) {
     return result;
   }
 
-  async function runLoop({ campaign, recipients, body, enableSms, extrasFor, sampleText, buildMessage }) {
+  async function runLoop({ campaign, recipients, body, enableSms, extrasFor, sampleText, buildMessages }) {
     const batch = delivery.createBatch(sampleText, {
       campaignId: campaign?.id || null,
       enableSms,
@@ -231,10 +249,43 @@ export function createSendService(ctx) {
 
       const recipient = recipients[index];
       const { phone, names } = recipient;
+      const extras = extrasFor(recipient);
+      const perPerson = shouldSendPerPerson(names, body, extras);
+      const alreadySent = Array.isArray(recipient.sentNames) ? recipient.sentNames : [];
+      const pendingNames = perPerson
+        ? names.filter((name) => !alreadySent.some((sent) => namesEqual(sent, name)))
+        : names;
       const globalIndex = offset + index;
       sendJob.index = globalIndex;
       sendJob.total = campaign?.totalRecipients || recipients.length;
-      const text = buildMessage(names, body, extrasFor(recipient)) || sampleText;
+      const texts = buildMessages(perPerson ? pendingNames : names, body, extras);
+      const text = texts.join("\n\n") || sampleText;
+
+      if (perPerson && alreadySent.length && !pendingNames.length) {
+        sendJob.sent += 1;
+        const waitingDetail = enableSms
+          ? "Sent · waiting 10 minutes for delivery (SMS fallback active)"
+          : "Sent · waiting for delivery (SMS off for this campaign)";
+        ctx.io.emit("send:progress", {
+          index: globalIndex,
+          total: sendJob.total,
+          phone: `+${phone}`,
+          state: "waiting",
+          detail: waitingDetail,
+          campaignId: campaign?.id || null,
+        });
+        if (campaign) {
+          ctx.services.campaigns.updateRecipient(campaign.id, {
+            phone,
+            state: "waiting",
+            channel: "whatsapp",
+            detail: waitingDetail,
+            sentNames: alreadySent,
+          });
+        }
+        index += 1;
+        continue;
+      }
 
       if (campaign) {
         ctx.services.campaigns.updateRecipient(campaign.id, {
@@ -300,28 +351,69 @@ export function createSendService(ctx) {
           }
           index += 1;
         } else {
-          ctx.io.emit("send:progress", {
-            index: globalIndex,
-            total: sendJob.total,
-            phone: `+${phone}`,
-            state: "sending",
-            detail: "Typing & sending…",
-            campaignId: campaign?.id || null,
-          });
-          const result = await sendOne(target.jid, text);
-          if (sendJob.cancelled && !result) {
+          const outgoing = texts.length ? texts : [text];
+          const sentSoFar = [...alreadySent];
+          let lastResult = null;
+          let stoppedMid = false;
+
+          for (let m = 0; m < outgoing.length; m += 1) {
+            if (m > 0) {
+              await waitGap(jitter(4_000, 8_000), isCancelled);
+              if (sendJob.cancelled) {
+                stoppedMid = true;
+                break;
+              }
+              if (!ctx.services.whatsapp.isOpen()) {
+                throw new Error("WhatsApp is disconnected");
+              }
+            }
+            const familyLabel =
+              perPerson && names.length > 1
+                ? `Typing & sending ${sentSoFar.length + 1} of ${names.length}…`
+                : "Typing & sending…";
+            ctx.io.emit("send:progress", {
+              index: globalIndex,
+              total: sendJob.total,
+              phone: `+${phone}`,
+              state: "sending",
+              detail: familyLabel,
+              campaignId: campaign?.id || null,
+            });
+            lastResult = await sendOne(target.jid, outgoing[m]);
+            if (sendJob.cancelled && !lastResult) {
+              stoppedMid = true;
+              break;
+            }
+            if (perPerson && pendingNames[m]) {
+              sentSoFar.push(pendingNames[m]);
+              recipient.sentNames = sentSoFar;
+              if (campaign) {
+                ctx.services.campaigns.updateRecipient(campaign.id, {
+                  phone,
+                  state: "sending",
+                  channel: "whatsapp",
+                  detail: `Sent ${sentSoFar.length} of ${names.length} family messages`,
+                  sentNames: sentSoFar,
+                });
+              }
+            }
+          }
+
+          if (stoppedMid) {
             if (campaign) {
               ctx.services.campaigns.updateRecipient(campaign.id, {
                 phone,
                 state: "retry",
                 channel: "none",
                 detail: "Stopped before send · will retry if you resume",
+                sentNames: sentSoFar,
               });
             }
             break;
           }
+
           sendJob.sent += 1;
-          delivery.trackDelivery(batch, { phone, messageId: result?.id, waitReason: "sent", text });
+          delivery.trackDelivery(batch, { phone, messageId: lastResult?.id, waitReason: "sent", text });
           const waitingDetail = enableSms
             ? "Sent · waiting 10 minutes for delivery (SMS fallback active)"
             : "Sent · waiting for delivery (SMS off for this campaign)";
@@ -339,6 +431,7 @@ export function createSendService(ctx) {
               state: "waiting",
               channel: "whatsapp",
               detail: waitingDetail,
+              sentNames: sentSoFar,
             });
           }
           index += 1;
@@ -352,6 +445,7 @@ export function createSendService(ctx) {
               state: "retry",
               channel: "none",
               detail: "Network or WhatsApp dropped. Will retry this number.",
+              sentNames: recipient.sentNames,
             });
           }
           ctx.io.emit("send:progress", {
@@ -514,7 +608,7 @@ export function createSendService(ctx) {
       enableSms,
       extrasFor,
       sampleText: checked.sampleText,
-      buildMessage: checked.buildMessage,
+      buildMessages: checked.buildMessages,
     });
   }
 
@@ -589,7 +683,7 @@ export function createSendService(ctx) {
       enableSms,
       extrasFor,
       sampleText: checked.sampleText,
-      buildMessage: checked.buildMessage,
+      buildMessages: checked.buildMessages,
     });
   }
 

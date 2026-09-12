@@ -1,5 +1,9 @@
 import { createJsonStore } from "../../infrastructure/json-file.js";
-import { applyCodePlaceholder, applyPersonNameTemplate } from "../../shared/names.js";
+import {
+  applyCodePlaceholder,
+  applyPersonNameTemplate,
+  shouldSendPerPerson,
+} from "../../shared/names.js";
 
 export function createMessageTemplateService(ctx) {
   const { DEFAULT_NAME_TEMPLATE, MESSAGE_SETTINGS_PATH } = ctx.config;
@@ -75,6 +79,17 @@ export function createMessageTemplateService(ctx) {
     return applyCodePlaceholder(result, extras.code);
   }
 
+  function buildRecipientMessages(names, body, extras = {}) {
+    const nameList = Array.isArray(names) ? names.filter(Boolean) : [];
+    if (shouldSendPerPerson(nameList, body, extras)) {
+      return nameList
+        .map((name) => buildRecipientMessage([name], body, extras))
+        .filter(Boolean);
+    }
+    const one = buildRecipientMessage(nameList, body, extras);
+    return one ? [one] : [];
+  }
+
   async function save(payload, socket) {
     const useNameTemplate = Boolean(payload?.useNameTemplate);
     const template = String(payload?.template || "").trim() || DEFAULT_NAME_TEMPLATE;
@@ -92,7 +107,7 @@ export function createMessageTemplateService(ctx) {
       socket.emit(
         "message:saved",
         useNameTemplate
-          ? "Name template is on. Shared numbers get a greeting for each person, then one send."
+          ? "Name template is on. Shared numbers get a separate message for each person."
           : "Name template is off. The typed message is sent as-is."
       );
     } catch {
@@ -108,6 +123,7 @@ export function createMessageTemplateService(ctx) {
     emit,
     save,
     buildRecipientMessage,
+    buildRecipientMessages,
     usesNameTemplate: () => Boolean(settings.useNameTemplate),
   };
 }

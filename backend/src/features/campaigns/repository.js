@@ -35,6 +35,9 @@ export function createCampaignRepository(ctx) {
       takenAt: r.takenAt ? Number(r.takenAt) : null,
       takenAidId: String(r.takenAidId || "").trim(),
       printCount: Number(r.printCount) || 0,
+      sentNames: Array.isArray(r.sentNames)
+        ? r.sentNames.map((name) => String(name || "").replace(/\s+/g, " ").trim()).filter(Boolean)
+        : [],
       pickups: Array.isArray(r.pickups)
         ? r.pickups
             .map((p) => {

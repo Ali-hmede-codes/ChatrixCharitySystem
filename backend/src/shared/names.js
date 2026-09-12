@@ -1,8 +1,26 @@
+const FAMILY_COUNT_SUFFIX = /\s*\+\s*\d+\s*$/;
+
+export function stripFamilyCountSuffix(value) {
+  return String(value || "").replace(FAMILY_COUNT_SUFFIX, "").replace(/\s+/g, " ").trim();
+}
+
+function splitNameField(value) {
+  const raw = stripFamilyCountSuffix(value);
+  if (!raw) return [];
+  if (/\s*\+\s*/.test(raw)) {
+    return raw
+      .split(/\s*\+\s*/)
+      .map((name) => name.trim())
+      .filter((name) => name && !/^\d+$/.test(name));
+  }
+  return /^\d+$/.test(raw) ? [] : [raw];
+}
+
 export function uniquePersonNames(list) {
   const names = [];
   for (const value of list || []) {
     const name = String(value || "").replace(/\s+/g, " ").trim();
-    if (!name) continue;
+    if (!name || /^\d+$/.test(name)) continue;
     if (names.some((item) => item.toLowerCase() === name.toLowerCase())) continue;
     names.push(name);
   }
@@ -16,15 +34,22 @@ export function namesFromRecipient(item) {
       : [String(item?.name || "")];
   const split = [];
   for (const value of rawList) {
-    const raw = String(value || "").replace(/\s+/g, " ").trim();
-    if (!raw) continue;
-    if (/\s*\+\s*/.test(raw)) {
-      split.push(...raw.split(/\s*\+\s*/).map((name) => name.trim()).filter(Boolean));
-    } else {
-      split.push(raw);
-    }
+    split.push(...splitNameField(value));
   }
   return uniquePersonNames(split);
+}
+
+export function contactSaveName(item) {
+  const names = namesFromRecipient(item);
+  if (names.length >= 2) return `${names[0]} +${names.length}`;
+  if (names.length === 1) return names[0];
+  return stripFamilyCountSuffix(item?.name);
+}
+
+export function shouldSendPerPerson(names, body, extras = {}) {
+  const nameList = Array.isArray(names) ? names.filter(Boolean) : [];
+  if (nameList.length <= 1) return false;
+  return Boolean(extras.useNameTemplate) || /\[PersonName\]/i.test(String(body || ""));
 }
 
 export function personSlots(item) {
@@ -46,7 +71,7 @@ export function namesEqual(a, b) {
 }
 
 export function firstNameFrom(fullName) {
-  const text = String(fullName || "").trim();
+  const text = stripFamilyCountSuffix(fullName);
   if (!text) return "Contact";
   return text.split(/\s+/).filter(Boolean)[0].slice(0, 40);
 }

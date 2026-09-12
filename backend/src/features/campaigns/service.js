@@ -293,6 +293,7 @@ export function createCampaignService(ctx) {
       names: namesFromRecipient(r),
       name: r.name || "",
       code: r.code || "",
+      sentNames: Array.isArray(r.sentNames) ? r.sentNames : [],
     }));
   }
 
@@ -378,7 +379,7 @@ export function createCampaignService(ctx) {
     return newCampaign;
   }
 
-  function updateRecipient(campaignId, { phone, state, channel, detail }) {
+  function updateRecipient(campaignId, { phone, state, channel, detail, sentNames }) {
     const campaign = campaigns.find((c) => c.id === String(campaignId));
     if (!campaign) return;
 
@@ -405,6 +406,9 @@ export function createCampaignService(ctx) {
     target.state = state || target.state;
     if (channel) target.channel = channel;
     if (detail) target.detail = detail;
+    if (Array.isArray(sentNames)) {
+      target.sentNames = sentNames.map((name) => String(name || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+    }
     target.updatedAt = Date.now();
     recountStats(campaign);
     scheduleSave();

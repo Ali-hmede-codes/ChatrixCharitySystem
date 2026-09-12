@@ -3,7 +3,7 @@ import { useApp } from "../../context/AppContext.jsx";
 import {
   personNames,
   personInitials,
-  buildPreviewMessage,
+  buildPreviewMessages,
   messageHasCodePlaceholder,
   messageHasNamePlaceholder,
   sanitizeAidCode,
@@ -164,9 +164,11 @@ export function SendScreen() {
     };
   }, [people, hasNames, hasCodes]);
 
-  const previewText = buildPreviewMessage(sampleRecipient, messageText, greetingConfig, {
+  const previewTexts = buildPreviewMessages(sampleRecipient, messageText, greetingConfig, {
     code: hasCodes ? sanitizeAidCode(sampleRecipient.code) : "",
   });
+  const sampleNames = hasNames ? personNames(sampleRecipient) : [];
+  const samplePreviewName = sampleNames[0] || sampleRecipient.name || "Recipient";
 
   function setConstrainedMessage(next, caret) {
     const constrained = constrainMessageToColumns(next, { hasNames, hasCodes });
@@ -486,7 +488,7 @@ export function SendScreen() {
                             onChange={(e) => setIncludeGreeting(e.target.checked)}
                             disabled={sendingBusy}
                           />
-                          <span>Start with greeting: مرحبا [PersonName]</span>
+                          <span>Start with greeting: مرحبا [PersonName] — shared numbers get a separate message each</span>
                         </label>
                       )}
                     </div>
@@ -694,7 +696,8 @@ export function SendScreen() {
                 <div className="preview-card-clean">
                   <div className="preview-title-row">
                     <span className="preview-title">
-                      WhatsApp Preview ({hasNames ? sampleRecipient.name || "Recipient" : "Recipient"})
+                      WhatsApp Preview ({hasNames ? samplePreviewName : "Recipient"}
+                      {sampleNames.length > 1 ? ` · ${sampleNames.length} messages` : ""})
                     </span>
                     <span className="chip-badge chip-neutral">Live Preview</span>
                   </div>
@@ -703,32 +706,34 @@ export function SendScreen() {
                   <div className="wa-clean-mockup">
                     <div className="wa-mockup-header-clean">
                       <div className="wa-mockup-avatar">
-                        {hasNames ? sampleRecipient.name?.[0] || "C" : "C"}
+                        {hasNames ? samplePreviewName?.[0] || "C" : "C"}
                       </div>
                       <div className="wa-mockup-meta">
                         <strong className="wa-mockup-name">
-                          {hasNames ? sampleRecipient.name || "Beneficiary" : "Beneficiary"}
+                          {hasNames ? samplePreviewName : "Beneficiary"}
                         </strong>
                         <span className="wa-mockup-status">online</span>
                       </div>
                     </div>
 
                     <div className="wa-mockup-chat-canvas">
-                      <div className="wa-bubble-clean" dir="auto">
-                        <p className="wa-msg-text">
-                          {previewText ||
-                            "Your message preview will appear here as the beneficiary receives it…"}
-                        </p>
-                        <div className="wa-msg-time-row">
-                          <span className="wa-msg-time">
-                            {new Date().toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                          <span className="wa-blue-ticks">✓✓</span>
+                      {(previewTexts.length ? previewTexts : [""]).map((text, idx) => (
+                        <div key={`preview-${idx}`} className="wa-bubble-clean" dir="auto">
+                          <p className="wa-msg-text">
+                            {text ||
+                              "Your message preview will appear here as the beneficiary receives it…"}
+                          </p>
+                          <div className="wa-msg-time-row">
+                            <span className="wa-msg-time">
+                              {new Date().toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                            <span className="wa-blue-ticks">✓✓</span>
+                          </div>
                         </div>
-                      </div>
+                      ))}
                     </div>
                   </div>
                 </div>

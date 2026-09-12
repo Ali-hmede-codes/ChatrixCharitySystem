@@ -1,5 +1,11 @@
 import { delay } from "../../shared/delay.js";
-import { firstNameFrom, namesEqual, namesFromRecipient } from "../../shared/names.js";
+import {
+  contactSaveName,
+  firstNameFrom,
+  namesEqual,
+  namesFromRecipient,
+  uniquePersonNames,
+} from "../../shared/names.js";
 import { toWhatsAppDigits } from "../../shared/phone.js";
 import { createContactRepository } from "./repository.js";
 
@@ -129,18 +135,26 @@ export function createContactsService(ctx) {
     }
 
     const incoming = Array.isArray(payload?.contacts) ? payload.contacts : [];
-    const unique = [];
-    const seen = new Set();
+    const byPhone = new Map();
     for (const item of incoming) {
       const phone = toWhatsAppDigits(item?.phone);
-      if (!phone || seen.has(phone)) continue;
-      seen.add(phone);
-      unique.push({
+      if (!phone) continue;
+      const existing = byPhone.get(phone);
+      if (existing) {
+        existing.names = uniquePersonNames([...(existing.names || []), ...namesFromRecipient(item)]);
+        continue;
+      }
+      byPhone.set(phone, {
         phone,
-        name: namesFromRecipient(item).join(" + ") || String(item?.name || "").replace(/\s+/g, " ").trim(),
+        names: namesFromRecipient(item),
+        name: String(item?.name || "").trim(),
       });
-      if (unique.length >= ctx.config.MAX_PEOPLE) break;
+      if (byPhone.size >= ctx.config.MAX_PEOPLE) break;
     }
+    const unique = [...byPhone.values()].map((item) => ({
+      phone: item.phone,
+      name: contactSaveName(item),
+    }));
 
     if (!unique.length) {
       socket.emit("contacts:error", "No numbers to save.");

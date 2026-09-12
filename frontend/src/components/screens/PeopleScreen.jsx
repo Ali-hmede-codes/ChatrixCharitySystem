@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useApp } from "../../context/AppContext.jsx";
 import { phoneKey } from "../../services/phone.js";
-import { personInitials, personNames } from "../../services/names.js";
+import { contactSaveName, personInitials, personNames } from "../../services/names.js";
 import { getAvatarColor } from "../../constants/colors.js";
 import {
   IconSearch,
@@ -238,7 +238,7 @@ export function PeopleScreen() {
                           </strong>
                           {person.names && person.names.length > 1 && (
                             <span className="family-share-badge">
-                              {person.names.length} family members sharing
+                              {person.names.length} family members · save as {contactSaveName(person)}
                             </span>
                           )}
                         </div>
