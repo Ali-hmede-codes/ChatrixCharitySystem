@@ -82,5 +82,5 @@ export function constrainMessageToColumns(text, columns = {}) {
   if (!columns.hasNames) {
     next = next.replace(/\[PersonName\]/gi, "");
   }
-  return next.replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n");
+  return next;
 }

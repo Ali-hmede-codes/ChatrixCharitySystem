@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
 import { useApp } from "../../context/AppContext.jsx";
 import {
   personNames,
@@ -81,6 +81,7 @@ export function SendScreen() {
   const [includeGreeting, setIncludeGreeting] = useState(() => Boolean(listColumns.hasNames));
   const [activeTemplateId, setActiveTemplateId] = useState("");
   const messageTextareaRef = useRef(null);
+  const messageCaretRef = useRef(null);
 
   // History search & modal filter state
   const [historySearch, setHistorySearch] = useState("");
@@ -101,7 +102,20 @@ export function SendScreen() {
     [people, hasNames]
   );
 
+  function rememberMessageCaret(start, end, length) {
+    const max = length ?? Number.MAX_SAFE_INTEGER;
+    const nextStart = Math.min(start ?? max, max);
+    messageCaretRef.current = {
+      start: nextStart,
+      end: Math.min(end ?? start ?? max, max),
+    };
+  }
+
   useEffect(() => {
+    const textarea = messageTextareaRef.current;
+    if (textarea && document.activeElement === textarea) {
+      rememberMessageCaret(textarea.selectionStart, textarea.selectionEnd);
+    }
     setMessageText((prev) => constrainMessageToColumns(prev, { hasNames, hasCodes }));
     setActiveTemplateId((id) => {
       const template = MESSAGE_TEMPLATES.find((item) => item.id === id);
@@ -110,6 +124,14 @@ export function SendScreen() {
     });
     setIncludeGreeting((prev) => (hasNames ? prev : false));
   }, [hasNames, hasCodes]);
+
+  useLayoutEffect(() => {
+    const textarea = messageTextareaRef.current;
+    const caret = messageCaretRef.current;
+    if (!textarea || !caret || document.activeElement !== textarea) return;
+    const max = textarea.value.length;
+    textarea.setSelectionRange(Math.min(caret.start, max), Math.min(caret.end, max));
+  }, [messageText]);
 
   const availableTemplates = useMemo(
     () => MESSAGE_TEMPLATES.filter((template) => isTemplateAvailable(template, { hasNames, hasCodes })),
@@ -146,8 +168,19 @@ export function SendScreen() {
     code: hasCodes ? sanitizeAidCode(sampleRecipient.code) : "",
   });
 
-  function setConstrainedMessage(next) {
-    setMessageText(constrainMessageToColumns(next, { hasNames, hasCodes }));
+  function setConstrainedMessage(next, caret) {
+    const constrained = constrainMessageToColumns(next, { hasNames, hasCodes });
+    if (caret) {
+      rememberMessageCaret(caret.start, caret.end, constrained.length);
+    }
+    setMessageText(constrained);
+  }
+
+  function handleMessageChange(event) {
+    const { value, selectionStart, selectionEnd } = event.target;
+    rememberMessageCaret(selectionStart, selectionEnd, value.length);
+    setMessageText(value);
+    setActiveTemplateId("");
   }
 
   function insertToken(token) {
@@ -155,25 +188,27 @@ export function SendScreen() {
     if (token === AID_CODE_PLACEHOLDER && !hasCodes) return;
     const textarea = messageTextareaRef.current;
     if (!textarea) {
-      setConstrainedMessage(messageText ? `${messageText} ${token}` : token);
+      const next = messageText ? `${messageText} ${token}` : token;
+      setConstrainedMessage(next, { start: next.length, end: next.length });
       setActiveTemplateId("");
       return;
     }
     const start = textarea.selectionStart ?? textarea.value.length;
     const end = textarea.selectionEnd ?? start;
     const next = `${textarea.value.slice(0, start)}${token}${textarea.value.slice(end)}`;
-    setConstrainedMessage(next);
+    const pos = start + token.length;
+    setConstrainedMessage(next, { start: pos, end: pos });
     setActiveTemplateId("");
     requestAnimationFrame(() => {
       textarea.focus();
-      const pos = start + token.length;
       textarea.setSelectionRange(pos, pos);
     });
   }
 
   function applyTemplate(template) {
     if (!isTemplateAvailable(template, { hasNames, hasCodes })) return;
-    setConstrainedMessage(template.body);
+    const body = constrainMessageToColumns(template.body, { hasNames, hasCodes });
+    setConstrainedMessage(body, { start: body.length, end: body.length });
     setActiveTemplateId(template.id);
     requestAnimationFrame(() => {
       messageTextareaRef.current?.focus();
@@ -572,12 +607,9 @@ export function SendScreen() {
                         ? "Pick a template, or write here. Click [PersonName] where the name should appear…"
                         : "Write the same announcement for everyone. Names and codes are off because those Excel columns were None."
                     }
-                    dir="auto"
+                    dir="rtl"
                     value={messageText}
-                    onChange={(e) => {
-                      setConstrainedMessage(e.target.value);
-                      setActiveTemplateId("");
-                    }}
+                    onChange={handleMessageChange}
                     disabled={sendingBusy}
                   />
                 </div>

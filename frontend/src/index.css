@@ -1818,6 +1818,9 @@ svg {
   color: var(--slate-800);
   resize: vertical;
   transition: border-color 0.15s, box-shadow 0.15s;
+  direction: rtl;
+  unicode-bidi: plaintext;
+  text-align: start;
 }
 
 .composer-textarea:focus {
