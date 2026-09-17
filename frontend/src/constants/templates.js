@@ -8,7 +8,7 @@ export const MESSAGE_TEMPLATES = [
     titleAr: "تحية + حصة + كود",
     needsName: true,
     needsCode: true,
-    body: `مرحبا [PersonName]،
+    body: `[Greeting] [PersonName]،
 نود إعلامكم بأن حصص المساعدات الغذائية جاهزة للاستلام.
 يرجى إبراز هذا الكود عند الاستلام: [Code]`,
   },

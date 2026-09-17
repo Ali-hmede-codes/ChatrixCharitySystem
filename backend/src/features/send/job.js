@@ -6,6 +6,7 @@ import {
   messageHasCodePlaceholder,
   messageHasNamePlaceholder,
   shouldSendPerPerson,
+  applyGreetingPlaceholder,
 } from "../../shared/names.js";
 import { toWhatsAppDigits } from "../../shared/phone.js";
 import { createDeliveryTracker } from "./delivery.js";
@@ -260,7 +261,8 @@ export function createSendService(ctx) {
         const buildOne =
           ctx.services.messages?.buildRecipientMessage ||
           ((_names, body, extra) => {
-            const next = String(body || "").trim();
+            let next = String(body || "").trim();
+            next = applyGreetingPlaceholder(next, Math.floor(Math.random() * 1000));
             return extra?.code ? next.replace(/\[(?:Aid)?Code\]|\[كود\]/gi, extra.code) : next;
           });
         if (shouldSendPerPerson(names, text, extras)) {
@@ -629,10 +631,13 @@ export function createSendService(ctx) {
       }
 
       if (index < recipients.length && !sendJob.cancelled) {
-        // Fixed pace: make each recipient cycle take SEND_PACE_MS (30s) total,
-        // regardless of typing/send duration. No random jitter, no long rests.
+        // Humanized pace: each cycle targets ~SEND_PACE_MS with a small random
+        // jitter (-2s..+4s) so sends don't land on an exact robotic interval.
+        // Identical timing across many recipients is a bulk-sending signal.
+        const jitter = Math.floor(Math.random() * 6000) - 2000;
+        const humanPace = Math.max(15_000, SEND_PACE_MS + jitter);
         const elapsed = Date.now() - recipientStartedAt;
-        const remaining = Math.max(0, SEND_PACE_MS - elapsed);
+        const remaining = Math.max(0, humanPace - elapsed);
         if (remaining > 0) await waitGap(remaining, isCancelled);
       }
     }

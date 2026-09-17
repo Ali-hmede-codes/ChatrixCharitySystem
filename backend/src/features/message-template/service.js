@@ -1,6 +1,7 @@
 import { createJsonStore } from "../../infrastructure/json-file.js";
 import {
   applyCodePlaceholder,
+  applyGreetingPlaceholder,
   applyPersonNameTemplate,
   shouldSendPerPerson,
 } from "../../shared/names.js";
@@ -13,6 +14,9 @@ export function createMessageTemplateService(ctx) {
   });
 
   let settings = { useNameTemplate: false, template: DEFAULT_NAME_TEMPLATE };
+  // Rotates the [Greeting] opening word across recipients so messages are not
+  // byte-identical. Advances on every built message (validation + send).
+  let greetingIndex = 0;
 
   function load() {
     const raw = store.read();
@@ -76,7 +80,7 @@ export function createMessageTemplateService(ctx) {
         .join("\n\n");
     }
 
-    return applyCodePlaceholder(result, extras.code);
+    return applyCodePlaceholder(applyGreetingPlaceholder(result, greetingIndex++), extras.code);
   }
 
   function buildRecipientMessages(names, body, extras = {}) {

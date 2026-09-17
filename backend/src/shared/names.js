@@ -98,6 +98,29 @@ export function applyPersonNameTemplate(template, name) {
   return String(template || "").replace(/\[PersonName\]/gi, name);
 }
 
+// Rotating Arabic greetings so consecutive recipients don't get byte-identical
+// bodies. Picked by index (rotates modulo length). WhatsApp flags identical
+// bulk text; varying the opening word is one of the cheapest defenses and
+// works alongside the per-recipient [PersonName] and [Code].
+export const GREETINGS = [
+  "مرحبا",
+  "أهلاً",
+  "تحية طيبة",
+  "عزيزي",
+];
+
+export function pickGreeting(index) {
+  return GREETINGS[Math.abs(index | 0) % GREETINGS.length];
+}
+
+export function applyGreetingPlaceholder(text, index) {
+  return String(text || "").replace(/\[Greeting\]/gi, pickGreeting(index));
+}
+
+export function messageHasGreetingPlaceholder(text) {
+  return /\[Greeting\]/i.test(String(text || ""));
+}
+
 export function sanitizeAidCode(value) {
   return String(value || "")
     .replace(/\s+/g, " ")
