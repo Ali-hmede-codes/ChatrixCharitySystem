@@ -629,7 +629,7 @@ export function createSendService(ctx) {
       }
 
       if (index < recipients.length && !sendJob.cancelled) {
-        // Fixed pace: make each recipient cycle take SEND_PACE_MS (10s) total,
+        // Fixed pace: make each recipient cycle take SEND_PACE_MS (30s) total,
         // regardless of typing/send duration. No random jitter, no long rests.
         const elapsed = Date.now() - recipientStartedAt;
         const remaining = Math.max(0, SEND_PACE_MS - elapsed);

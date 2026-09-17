@@ -29,8 +29,8 @@ export const config = {
   SESSION_ID: "default",
   MAX_PEOPLE: 400,
   // Fixed pace: each recipient takes exactly this long (typing + send + wait).
-  // 10s/recipient = 360/hour, conservative enough to avoid WhatsApp limits.
-  SEND_PACE_MS: 10_000,
+  // 30s/recipient = 2/minute = 120/hour, conservative to avoid WhatsApp limits.
+  SEND_PACE_MS: 30_000,
   // Pause between a household's per-person messages (same phone, multiple names).
   FAMILY_GAP_MS: 1_500,
   DELIVERY_WAIT_MS: 10 * 60 * 1000,
