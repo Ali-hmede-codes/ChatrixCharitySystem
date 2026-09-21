@@ -79,6 +79,7 @@ export const campaignsFeature = {
           ...p,
           status: wantStatus,
           limit: 5000,
+          includeSignature: true,
         });
         socket.emit("pickup:export-data", result);
       });
@@ -96,7 +97,12 @@ export const campaignsFeature = {
           });
           return;
         }
-        const result = campaigns.markTaken(payload?.campaignId, payload?.phone, payload?.personName);
+        const result = campaigns.markTaken(
+          payload?.campaignId,
+          payload?.phone,
+          payload?.personName,
+          payload?.signature
+        );
         if (!result.ok) {
           if (inv) result.inventory = inv.publicState();
           socket.emit("pickup:done", result);
@@ -112,7 +118,12 @@ export const campaignsFeature = {
       });
 
       socket.on("pickup:reprint", (payload) => {
-        const result = campaigns.reprintTaken(payload?.campaignId, payload?.phone, payload?.personName);
+        const result = campaigns.reprintTaken(
+          payload?.campaignId,
+          payload?.phone,
+          payload?.personName,
+          payload?.signature
+        );
         const inv = ctx.services.inventory;
         if (inv) result.inventory = inv.publicState();
         socket.emit("pickup:done", result);

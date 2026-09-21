@@ -4695,6 +4695,133 @@ svg {
   margin-top: 16px;
 }
 
+.pickup-sign-preview-row dd {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pickup-sign-preview {
+  max-width: 160px;
+  max-height: 52px;
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.sign-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 90;
+}
+.sign-sheet-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sign-sheet {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -46%) scale(0.96);
+  width: min(640px, 94vw);
+  max-height: 92dvh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 95;
+  padding: 22px 22px 18px;
+}
+.sign-sheet.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.sign-sheet .pickup-sheet-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--border-subtle);
+  background: #fff;
+  color: var(--slate-600);
+  cursor: pointer;
+}
+
+.sign-sheet-head {
+  margin-bottom: 12px;
+  padding-right: 40px;
+}
+.sign-sheet-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.sign-sheet-head p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--slate-500);
+  line-height: 1.4;
+}
+
+.sign-pad-wrap {
+  position: relative;
+  border: 1.5px dashed #94a3b8;
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+  height: min(280px, 42dvh);
+  min-height: 180px;
+  touch-action: none;
+  outline: none;
+}
+
+.sign-pad-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.sign-pad-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.sign-sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.sign-sheet-actions .btn-primary,
+.sign-sheet-actions .btn-secondary {
+  min-width: 108px;
+}
+
 @media (max-width: 1024px) {
   .pickup-desk-layout,
   .printer-settings-grid {
@@ -4796,6 +4923,24 @@ svg {
   }
   .export-sheet.is-open {
     transform: translateY(0);
+  }
+
+  .sign-sheet {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    transform: translateY(100%);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.18);
+    max-height: 92dvh;
+  }
+  .sign-sheet.is-open {
+    transform: translateY(0);
+  }
+  .sign-pad-wrap {
+    height: min(320px, 46dvh);
   }
 }
 

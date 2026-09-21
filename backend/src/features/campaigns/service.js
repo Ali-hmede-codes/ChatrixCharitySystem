@@ -4,6 +4,7 @@ import { namesFromRecipient, namesEqual, personSlots, uniquePersonNames, collaps
 import { matchesText, normalizeSearch } from "../../shared/search.js";
 import { campaignDayKey, formatAidId, maxAidSeqForDay, parseAidSeq } from "../../shared/aid-id.js";
 import { isRecipientPending, pauseCopy } from "../send/interrupt.js";
+import { sanitizeSignature } from "../../shared/signature.js";
 
 const PICKUP_RESULT_LIMIT = 80;
 const MERGE_RECIPIENT_LIMIT = 5000;
@@ -162,13 +163,14 @@ export function createCampaignService(ctx) {
         takenAt: pickup.takenAt ? Number(pickup.takenAt) : null,
         takenAidId: String(pickup.takenAidId || "").trim(),
         printCount: Number(pickup.printCount) || 0,
+        signature: sanitizeSignature(pickup.signature),
       });
     }
 
     recipient.pickups = slots.map((name) => {
       const found = byKey.get(name.toLowerCase());
       if (found) return { ...found, name };
-      return { name, takenAt: null, takenAidId: "", printCount: 0 };
+      return { name, takenAt: null, takenAidId: "", printCount: 0, signature: "" };
     });
     if (slots.length > 1) {
       recipient.names = slots;
@@ -210,10 +212,24 @@ export function createCampaignService(ctx) {
     return pickups.find((p) => namesEqual(p.name, wanted)) || null;
   }
 
-  function publicPickup(campaign, recipient, pickup) {
+  function slimPickup(pickup, includeSignature = false) {
+    const signature = sanitizeSignature(pickup?.signature);
+    const out = {
+      name: pickup?.name || "",
+      takenAt: pickup?.takenAt || null,
+      takenAidId: pickup?.takenAidId || "",
+      printCount: pickup?.printCount || 0,
+      signed: Boolean(signature),
+    };
+    if (includeSignature && signature) out.signature = signature;
+    return out;
+  }
+
+  function publicPickup(campaign, recipient, pickup, { includeSignature = false } = {}) {
     const pickups = ensurePickups(recipient);
     const familyNames = pickups.map((p) => p.name);
-    return {
+    const signature = sanitizeSignature(pickup.signature);
+    const result = {
       campaignId: campaign.id,
       campaignName: campaign.name,
       campaignDate: campaign.createdAt,
@@ -232,8 +248,11 @@ export function createCampaignService(ctx) {
       takenAt: pickup.takenAt || null,
       takenAidId: pickup.takenAidId || "",
       printCount: pickup.printCount || 0,
-      pickups,
+      signed: Boolean(signature),
+      pickups: pickups.map((p) => slimPickup(p, includeSignature)),
     };
+    if (includeSignature && signature) result.signature = signature;
+    return result;
   }
 
   function publicRecipient(campaign, recipient) {
@@ -245,7 +264,7 @@ export function createCampaignService(ctx) {
       phone: recipient.phone,
       name: recipient.name || "",
       names: Array.isArray(recipient.names) ? recipient.names : pickups.map((p) => p.name),
-      pickups,
+      pickups: pickups.map((p) => slimPickup(p, false)),
       familySize: pickups.length,
       familyTaken: pickups.filter((p) => p.takenAt).length,
       code: recipient.code || "",
@@ -282,7 +301,7 @@ export function createCampaignService(ctx) {
     const payload = {
       campaignId: campaign.id,
       recipient: publicRecipient(campaign, recipient),
-      pickup: pickup ? publicPickup(campaign, recipient, pickup) : null,
+      pickup: pickup ? publicPickup(campaign, recipient, pickup, { includeSignature: true }) : null,
       personName: pickup?.name || "",
       stats: { ...campaign.stats },
     };
@@ -388,7 +407,10 @@ export function createCampaignService(ctx) {
     return {
       ...publicSummary(found),
       sendOptions: { ...found.sendOptions },
-      recipients: found.recipients || [],
+      recipients: (found.recipients || []).map((r) => ({
+        ...r,
+        pickups: (r.pickups || []).map((p) => slimPickup(p, false)),
+      })),
     };
   }
 
@@ -803,6 +825,7 @@ export function createCampaignService(ctx) {
           takenAt: pickup.takenAt ? Number(pickup.takenAt) : null,
           takenAidId: String(pickup.takenAidId || "").trim(),
           printCount: Number(pickup.printCount) || 0,
+          signature: sanitizeSignature(pickup.signature),
         });
         continue;
       }
@@ -813,6 +836,7 @@ export function createCampaignService(ctx) {
         current.takenAidId = current.takenAidId || String(pickup.takenAidId || "").trim();
       }
       current.printCount = Math.max(Number(current.printCount) || 0, Number(pickup.printCount) || 0);
+      if (!current.signature) current.signature = sanitizeSignature(pickup.signature);
     }
     return [...byKey.values()];
   }
@@ -1039,6 +1063,7 @@ export function createCampaignService(ctx) {
     campaignId = "",
     status = "all",
     limit,
+    includeSignature = false,
   } = {}) {
     const q = String(query || "").trim();
     const day = resolveDayFilter({ campaignDay, scope });
@@ -1057,7 +1082,7 @@ export function createCampaignService(ctx) {
           if (wantStatus === "taken" && !taken) continue;
           if (q && !matchesPickupPerson(campaign, recipient, pickup, q)) continue;
           items.push({
-            ...publicPickup(campaign, recipient, pickup),
+            ...publicPickup(campaign, recipient, pickup, { includeSignature: Boolean(includeSignature) }),
             score: q ? pickupScore(pickup, recipient, q) : taken ? 10 : 50,
           });
         }
@@ -1098,7 +1123,7 @@ export function createCampaignService(ctx) {
     return Boolean(pickup && pickup.takenAt);
   }
 
-  function markTaken(campaignId, phone, personName) {
+  function markTaken(campaignId, phone, personName, signature) {
     const campaign = campaigns.find((c) => c.id === String(campaignId));
     if (!campaign) return { ok: false, error: "Campaign not found." };
     const target = findRecipient(campaign, phone);
@@ -1111,14 +1136,26 @@ export function createCampaignService(ctx) {
       };
     }
 
+    const cleanedSignature = sanitizeSignature(signature);
+
     if (pickup.takenAt) {
+      if (cleanedSignature && !pickup.signature) {
+        pickup.signature = cleanedSignature;
+        target.updatedAt = Date.now();
+        scheduleSave();
+        emitRecipient(campaign, target, pickup);
+      }
       return {
         ok: true,
         alreadyTaken: true,
         reprint: false,
         receipt: buildReceipt(campaign, target, pickup, { reprint: true }),
-        recipient: publicPickup(campaign, target, pickup),
+        recipient: publicPickup(campaign, target, pickup, { includeSignature: true }),
       };
+    }
+
+    if (!cleanedSignature) {
+      return { ok: false, error: "Ask the person to sign before printing." };
     }
 
     if (!pickup.takenAidId) {
@@ -1126,6 +1163,7 @@ export function createCampaignService(ctx) {
     }
     pickup.takenAt = Date.now();
     pickup.printCount = (Number(pickup.printCount) || 0) + 1;
+    pickup.signature = cleanedSignature;
     target.updatedAt = Date.now();
     ensurePickups(target);
     recountStats(campaign);
@@ -1136,11 +1174,11 @@ export function createCampaignService(ctx) {
       alreadyTaken: false,
       reprint: false,
       receipt: buildReceipt(campaign, target, pickup, { reprint: false }),
-      recipient: publicPickup(campaign, target, pickup),
+      recipient: publicPickup(campaign, target, pickup, { includeSignature: true }),
     };
   }
 
-  function reprintTaken(campaignId, phone, personName) {
+  function reprintTaken(campaignId, phone, personName, signature) {
     const campaign = campaigns.find((c) => c.id === String(campaignId));
     if (!campaign) return { ok: false, error: "Campaign not found." };
     const target = findRecipient(campaign, phone);
@@ -1149,6 +1187,13 @@ export function createCampaignService(ctx) {
     if (!pickup) return { ok: false, error: "Choose which family member to reprint." };
     if (!pickup.takenAt || !pickup.takenAidId) {
       return { ok: false, error: "This person has not collected aid yet." };
+    }
+    const cleanedSignature = sanitizeSignature(signature);
+    if (!pickup.signature) {
+      if (!cleanedSignature) {
+        return { ok: false, error: "Ask the person to sign before printing." };
+      }
+      pickup.signature = cleanedSignature;
     }
     pickup.printCount = (Number(pickup.printCount) || 1) + 1;
     target.updatedAt = Date.now();
@@ -1160,7 +1205,7 @@ export function createCampaignService(ctx) {
       alreadyTaken: true,
       reprint: true,
       receipt: buildReceipt(campaign, target, pickup, { reprint: true }),
-      recipient: publicPickup(campaign, target, pickup),
+      recipient: publicPickup(campaign, target, pickup, { includeSignature: true }),
     };
   }
 
@@ -1173,6 +1218,7 @@ export function createCampaignService(ctx) {
     if (!pickup) return { ok: false, error: "Choose which family member to undo." };
     if (!pickup.takenAt) return { ok: false, error: "This person is not marked as collected." };
     pickup.takenAt = null;
+    pickup.signature = "";
     // Clear the recipient-level take too. Otherwise ensurePickups() would see
     // `recipient.takenAt` still set with no taken pickup and re-migrate it back
     // onto the pickup (reverting this undo). The per-pickup takenAidId is kept
@@ -1221,6 +1267,7 @@ export function createCampaignService(ctx) {
               takenAt: p.takenAt || null,
               takenAidId: p.takenAidId || "",
               printCount: p.printCount || 0,
+              signature: sanitizeSignature(p.signature),
             })),
           };
         }),
@@ -1253,16 +1300,23 @@ export function createCampaignService(ctx) {
     if (type === "mark") {
       const wantAidId = String(op?.takenAidId || "").trim();
       const wantAt = Number(op?.takenAt) || Date.now();
+      const cleanedSignature = sanitizeSignature(op?.signature);
 
       // Already collected with the SAME offline id -> idempotent replay.
       if (pickup.takenAt && pickup.takenAidId === wantAidId) {
+        if (cleanedSignature && !pickup.signature) {
+          pickup.signature = cleanedSignature;
+          target.updatedAt = Date.now();
+          await persistNow();
+          emitRecipient(campaign, target, pickup);
+        }
         return {
           ok: true,
           alreadyTaken: true,
           reprint: false,
           conflict: false,
           receipt: buildReceipt(campaign, target, pickup, { reprint: true }),
-          recipient: publicPickup(campaign, target, pickup),
+          recipient: publicPickup(campaign, target, pickup, { includeSignature: true }),
           inventory: ctx.services.inventory?.publicState?.() || null,
         };
       }
@@ -1275,15 +1329,20 @@ export function createCampaignService(ctx) {
           reprint: false,
           conflict: true,
           receipt: buildReceipt(campaign, target, pickup, { reprint: true }),
-          recipient: publicPickup(campaign, target, pickup),
+          recipient: publicPickup(campaign, target, pickup, { includeSignature: true }),
           inventory: ctx.services.inventory?.publicState?.() || null,
         };
+      }
+
+      if (!cleanedSignature) {
+        return { ok: false, error: "Ask the person to sign before printing.", conflict: false };
       }
 
       // Adopt the client-supplied Aid ID and timestamp.
       pickup.takenAidId = wantAidId || allocateAidId(campaign);
       pickup.takenAt = wantAt;
       pickup.printCount = (Number(pickup.printCount) || 0) + 1;
+      pickup.signature = cleanedSignature;
       target.updatedAt = Date.now();
       // Make sure the per-day sequence counter is past this offline id so a
       // future online allocation never collides with it.
@@ -1310,7 +1369,7 @@ export function createCampaignService(ctx) {
         reprint: false,
         conflict: false,
         receipt: buildReceipt(campaign, target, pickup, { reprint: false }),
-        recipient: publicPickup(campaign, target, pickup),
+        recipient: publicPickup(campaign, target, pickup, { includeSignature: true }),
         inventory,
       };
     }
@@ -1319,11 +1378,18 @@ export function createCampaignService(ctx) {
       if (!pickup.takenAt || !pickup.takenAidId) {
         return { ok: false, error: "This person has not collected aid yet.", conflict: false };
       }
+      const cleanedSignature = sanitizeSignature(op?.signature);
+      if (!pickup.signature) {
+        if (!cleanedSignature) {
+          return { ok: false, error: "Ask the person to sign before printing.", conflict: false };
+        }
+        pickup.signature = cleanedSignature;
+      }
       // Use max(current, target) so a replayed (lost-ack) reprint op is
       // idempotent and never inflates the count beyond what was printed.
-      const target = Number(op?.printCount) || 0;
+      const wantedCount = Number(op?.printCount) || 0;
       const current = Number(pickup.printCount) || 1;
-      pickup.printCount = target > current ? target : current + 1;
+      pickup.printCount = wantedCount > current ? wantedCount : current + 1;
       target.updatedAt = Date.now();
       ensurePickups(target);
       await persistNow();
@@ -1334,7 +1400,7 @@ export function createCampaignService(ctx) {
         reprint: true,
         conflict: false,
         receipt: buildReceipt(campaign, target, pickup, { reprint: true }),
-        recipient: publicPickup(campaign, target, pickup),
+        recipient: publicPickup(campaign, target, pickup, { includeSignature: true }),
         inventory: ctx.services.inventory?.publicState?.() || null,
       };
     }
@@ -1351,6 +1417,7 @@ export function createCampaignService(ctx) {
         };
       }
       pickup.takenAt = null;
+      pickup.signature = "";
       target.takenAt = null;
       target.updatedAt = Date.now();
       ensurePickups(target);

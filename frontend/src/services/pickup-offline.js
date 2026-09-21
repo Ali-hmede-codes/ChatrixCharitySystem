@@ -15,6 +15,7 @@
 import { namesEqual, nameCodeFor } from "./names.js";
 import { matchesText, normalizeSearch } from "./search.js";
 import { campaignDayKey, allocateOfflineAidId } from "./aid-id.js";
+import { sanitizeSignature } from "./signature.js";
 
 const PICKUP_RESULT_LIMIT = 80;
 
@@ -45,10 +46,24 @@ function findPickup(recipient, personName) {
   return pickups.find((p) => namesEqual(p.name, wanted)) || null;
 }
 
-function publicPickup(campaign, recipient, pickup) {
+function slimPickup(pickup, includeSignature = false) {
+  const signature = sanitizeSignature(pickup?.signature);
+  const out = {
+    name: pickup?.name || "",
+    takenAt: pickup?.takenAt || null,
+    takenAidId: pickup?.takenAidId || "",
+    printCount: pickup?.printCount || 0,
+    signed: Boolean(signature),
+  };
+  if (includeSignature && signature) out.signature = signature;
+  return out;
+}
+
+function publicPickup(campaign, recipient, pickup, includeSignature = false) {
   const pickups = recipient.pickups || [];
   const familyNames = pickups.map((p) => p.name);
-  return {
+  const signature = sanitizeSignature(pickup.signature);
+  const result = {
     campaignId: campaign.id,
     campaignName: campaign.name,
     campaignDate: campaign.createdAt,
@@ -67,8 +82,11 @@ function publicPickup(campaign, recipient, pickup) {
     takenAt: pickup.takenAt || null,
     takenAidId: pickup.takenAidId || "",
     printCount: pickup.printCount || 0,
-    pickups,
+    signed: Boolean(signature),
+    pickups: pickups.map((p) => slimPickup(p, includeSignature)),
   };
+  if (includeSignature && signature) result.signature = signature;
+  return result;
 }
 
 function buildReceipt(campaign, recipient, pickup, { reprint = false, branding = {} } = {}) {
@@ -153,6 +171,7 @@ export function searchPickupOffline(snapshot, payload = {}) {
     Math.max(Number(payload.limit) || (wantStatus === "taken" ? 2000 : PICKUP_RESULT_LIMIT), 1),
     5000
   );
+  const includeSignature = Boolean(payload.includeSignature);
   const items = [];
 
   for (const campaign of campaigns) {
@@ -165,7 +184,7 @@ export function searchPickupOffline(snapshot, payload = {}) {
         if (wantStatus === "taken" && !taken) continue;
         if (q && !matchesPickupPerson(campaign, recipient, pickup, q)) continue;
         items.push({
-          ...publicPickup(campaign, recipient, pickup),
+          ...publicPickup(campaign, recipient, pickup, includeSignature),
           score: q ? pickupScore(pickup, recipient, q) : taken ? 10 : 50,
         });
       }
@@ -197,7 +216,12 @@ export function searchPickupOffline(snapshot, payload = {}) {
 export function exportOffline(snapshot, payload = {}) {
   const p = payload || {};
   const wantStatus = p.status === "pending" || p.status === "all" ? p.status : "taken";
-  return searchPickupOffline(snapshot, { ...p, status: wantStatus, limit: 5000 });
+  return searchPickupOffline(snapshot, {
+    ...p,
+    status: wantStatus,
+    limit: 5000,
+    includeSignature: true,
+  });
 }
 
 // --- mutations ---------------------------------------------------------------
@@ -209,7 +233,8 @@ export function exportOffline(snapshot, payload = {}) {
 //              to sync, e.g. an error or an already-taken reprint request)
 
 export function markOffline(snapshot, inventory, args, branding = {}) {
-  const { campaignId, phone, personName } = args;
+  const { campaignId, phone, personName, signature } = args;
+  const cleanedSignature = sanitizeSignature(signature);
   const campaign = (snapshot?.campaigns || []).find((c) => c.id === campaignId);
   if (!campaign) {
     return { snapshot, event: { ok: false, error: "Campaign not found." }, op: null };
@@ -230,18 +255,52 @@ export function markOffline(snapshot, inventory, args, branding = {}) {
     };
   }
 
-  // Already collected -> reprint path. No stock consumed, not blocked at 0,
-  // and nothing to sync (the server already has it taken).
+  // Already collected -> reprint path. No stock consumed, not blocked at 0.
   if (pickup.takenAt) {
+    const hadSignature = Boolean(sanitizeSignature(pickup.signature));
+    let nextSnapshot = snapshot;
+    if (cleanedSignature && !hadSignature) {
+      nextSnapshot = withCampaign(snapshot, campaignId, (clone) => {
+        const r = (clone.recipients || []).find((x) => x.phone === phone);
+        const p = findPickup(r, personName);
+        if (p && !p.signature) {
+          p.signature = cleanedSignature;
+          r.updatedAt = Date.now();
+        }
+      });
+    }
+    const updatedCampaign = nextSnapshot.campaigns.find((c) => c.id === campaignId) || campaign;
+    const updatedRecipient =
+      (updatedCampaign.recipients || []).find((r) => r.phone === phone) || recipient;
+    const updatedPickup = findPickup(updatedRecipient, personName) || pickup;
     const event = {
       ok: true,
       alreadyTaken: true,
       reprint: false,
-      receipt: buildReceipt(campaign, recipient, pickup, { reprint: true, branding }),
-      recipient: publicPickup(campaign, recipient, pickup),
+      receipt: buildReceipt(updatedCampaign, updatedRecipient, updatedPickup, { reprint: true, branding }),
+      recipient: publicPickup(updatedCampaign, updatedRecipient, updatedPickup, true),
       inventory,
     };
-    return { snapshot, event, op: null };
+    const op =
+      cleanedSignature && !hadSignature
+        ? {
+            op: "reprint",
+            campaignId,
+            phone,
+            personName: updatedPickup.name,
+            printCount: Number(updatedPickup.printCount) || 1,
+            signature: cleanedSignature,
+          }
+        : null;
+    return { snapshot: nextSnapshot, event, op };
+  }
+
+  if (!cleanedSignature) {
+    return {
+      snapshot,
+      event: { ok: false, error: "Ask the person to sign before printing." },
+      op: null,
+    };
   }
 
   // Block new collections when out of stock — mirrors the backend.
@@ -268,6 +327,7 @@ export function markOffline(snapshot, inventory, args, branding = {}) {
       p.takenAidId = aidId;
       p.takenAt = takenAt;
       p.printCount = (Number(p.printCount) || 0) + 1;
+      p.signature = cleanedSignature;
     }
     r.updatedAt = takenAt;
   });
@@ -291,7 +351,7 @@ export function markOffline(snapshot, inventory, args, branding = {}) {
       reprint: false,
       branding,
     }),
-    recipient: publicPickup(updatedCampaign, updatedRecipient, updatedPickup),
+    recipient: publicPickup(updatedCampaign, updatedRecipient, updatedPickup, true),
     inventory: nextInventory,
   };
 
@@ -302,13 +362,15 @@ export function markOffline(snapshot, inventory, args, branding = {}) {
     personName: updatedPickup.name,
     takenAt,
     takenAidId: aidId,
+    signature: cleanedSignature,
   };
 
   return { snapshot: nextSnapshot, event, op };
 }
 
 export function reprintOffline(snapshot, inventory, args, branding = {}) {
-  const { campaignId, phone, personName } = args;
+  const { campaignId, phone, personName, signature } = args;
+  const cleanedSignature = sanitizeSignature(signature);
   const campaign = (snapshot?.campaigns || []).find((c) => c.id === campaignId);
   if (!campaign) {
     return { snapshot, event: { ok: false, error: "Campaign not found." }, op: null };
@@ -328,12 +390,20 @@ export function reprintOffline(snapshot, inventory, args, branding = {}) {
       op: null,
     };
   }
+  if (!sanitizeSignature(pickup.signature) && !cleanedSignature) {
+    return {
+      snapshot,
+      event: { ok: false, error: "Ask the person to sign before printing." },
+      op: null,
+    };
+  }
 
   const nextSnapshot = withCampaign(snapshot, campaignId, (clone) => {
     const r = (clone.recipients || []).find((x) => x.phone === phone);
     const p = findPickup(r, personName);
     if (p) {
       p.printCount = (Number(p.printCount) || 1) + 1;
+      if (cleanedSignature && !p.signature) p.signature = cleanedSignature;
       r.updatedAt = Date.now();
     }
   });
@@ -350,7 +420,7 @@ export function reprintOffline(snapshot, inventory, args, branding = {}) {
       reprint: true,
       branding,
     }),
-    recipient: publicPickup(updatedCampaign, updatedRecipient, updatedPickup),
+    recipient: publicPickup(updatedCampaign, updatedRecipient, updatedPickup, true),
     inventory,
   };
 
@@ -363,6 +433,7 @@ export function reprintOffline(snapshot, inventory, args, branding = {}) {
     phone,
     personName: updatedPickup.name,
     printCount: Number(updatedPickup.printCount) || 1,
+    signature: sanitizeSignature(updatedPickup.signature) || cleanedSignature || "",
   };
 
   return { snapshot: nextSnapshot, event, op };
@@ -392,6 +463,7 @@ export function undoOffline(snapshot, inventory, args) {
     const p = findPickup(r, personName);
     if (p) {
       p.takenAt = null;
+      p.signature = "";
       // Keep takenAidId so the same ID is reused if they collect again.
     }
     r.updatedAt = Date.now();
@@ -454,12 +526,24 @@ export function applyRecipientEventToSnapshot(snapshot, event) {
     const recipients = (c.recipients || []).map((r) => {
       if (r.phone !== recipient.phone) return r;
       const pickups = Array.isArray(recipient.pickups)
-        ? recipient.pickups.map((p) => ({
-            name: p.name,
-            takenAt: p.takenAt ? Number(p.takenAt) : null,
-            takenAidId: String(p.takenAidId || "").trim(),
-            printCount: Number(p.printCount) || 0,
-          }))
+        ? recipient.pickups.map((p) => {
+            const prev = (r.pickups || []).find((x) => namesEqual(x.name, p.name)) || {};
+            const fromFocused =
+              event.pickup && namesEqual(event.pickup.name || event.pickup.personName, p.name)
+                ? event.pickup.signature
+                : "";
+            return {
+              name: p.name,
+              takenAt: p.takenAt ? Number(p.takenAt) : null,
+              takenAidId: String(p.takenAidId || "").trim(),
+              printCount: Number(p.printCount) || 0,
+              signature:
+                sanitizeSignature(p.signature) ||
+                sanitizeSignature(fromFocused) ||
+                sanitizeSignature(prev.signature) ||
+                "",
+            };
+          })
         : r.pickups;
       return {
         ...r,

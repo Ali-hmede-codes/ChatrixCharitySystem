@@ -1,4 +1,5 @@
 import { createJsonStore } from "../../infrastructure/json-file.js";
+import { sanitizeSignature } from "../../shared/signature.js";
 
 const MAX_SAVED_CAMPAIGNS = 60;
 
@@ -54,6 +55,7 @@ export function createCampaignRepository(ctx) {
                 takenAt: p.takenAt ? Number(p.takenAt) : null,
                 takenAidId: String(p.takenAidId || "").trim(),
                 printCount: Number(p.printCount) || 0,
+                signature: sanitizeSignature(p.signature),
               };
             })
             .filter(Boolean)

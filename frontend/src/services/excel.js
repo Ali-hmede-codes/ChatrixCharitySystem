@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
-import * as XLSXStyle from "xlsx-js-style";
 import { formatPhone, normalizePhone, toWhatsAppDigits } from "./phone.js";
+import { signatureImageParts } from "./signature.js";
 
 export function cellText(value) {
   if (value == null || value === "") return "";
@@ -270,7 +270,7 @@ export function formatSheetDateTime(ts) {
   return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
-export function downloadCollectedExcel(rows, { campaignDay, campaignName, status = "taken" } = {}) {
+export async function downloadCollectedExcel(rows, { campaignDay, campaignName, status = "taken" } = {}) {
   const list = Array.isArray(rows) ? rows : [];
   const wantStatus = status === "pending" || status === "all" ? status : "taken";
 
@@ -284,6 +284,7 @@ export function downloadCollectedExcel(rows, { campaignDay, campaignName, status
     { key: "collectedAt", header: "Collected at", width: 18 },
     { key: "printCount", header: "Print count", width: 12 },
     { key: "status", header: "Status", width: 14 },
+    { key: "signature", header: "Signature", width: 22 },
   ];
 
   const buildRow = (row) => ({
@@ -297,52 +298,66 @@ export function downloadCollectedExcel(rows, { campaignDay, campaignName, status
     collectedAt: formatSheetDateTime(row.takenAt),
     printCount: row.printCount || 0,
     status: row.takenAt ? "Collected" : "Not collected",
+    signature: row.takenAt ? row.signature || "" : "",
   });
 
   const sheetRows = list.map(buildRow);
-  const aoa = [
-    columns.map((c) => c.header),
-    ...sheetRows.map((r) => columns.map((c) => r[c.key])),
-  ];
-
-  const sheet = XLSXStyle.utils.aoa_to_sheet(aoa);
-  sheet["!cols"] = columns.map((c) => ({ wch: c.width }));
-
-  const HEADER_STYLE = {
-    fill: { patternType: "solid", fgColor: { rgb: "FF305496" } },
-    font: { color: { rgb: "FFFFFFFF" }, bold: true },
-    alignment: { horizontal: "left", vertical: "center" },
-  };
-  const NOT_COLLECTED_STYLE = {
-    fill: { patternType: "solid", fgColor: { rgb: "FFFFC7CE" } },
-    font: { color: { rgb: "FF9C0006" } },
-  };
-
-  // Header styling.
-  columns.forEach((_, i) => {
-    const addr = XLSXStyle.utils.encode_cell({ r: 0, c: i });
-    if (!sheet[addr]) sheet[addr] = { t: "s", v: "" };
-    sheet[addr].s = HEADER_STYLE;
-  });
-
-  // Highlight not-collected rows in red. Only meaningful for the "all" export,
-  // where collected and not-collected rows are mixed in one sheet.
-  if (wantStatus === "all") {
-    sheetRows.forEach((r, rIdx) => {
-      if (r.collectedAt) return;
-      const rowNumber = rIdx + 1;
-      columns.forEach((_, cIdx) => {
-        const addr = XLSXStyle.utils.encode_cell({ r: rowNumber, c: cIdx });
-        if (!sheet[addr]) sheet[addr] = { t: "s", v: "" };
-        sheet[addr].s = NOT_COLLECTED_STYLE;
-      });
-    });
-  }
-
-  const workbook = XLSXStyle.utils.book_new();
+  const ExcelJSModule = await import("exceljs");
+  const ExcelJS = ExcelJSModule.default || ExcelJSModule;
+  const workbook = new ExcelJS.Workbook();
   const sheetName =
     wantStatus === "taken" ? "Collected" : wantStatus === "pending" ? "Not collected" : "Aid";
-  XLSXStyle.utils.book_append_sheet(workbook, sheet, String(sheetName).slice(0, 31));
+  const sheet = workbook.addWorksheet(String(sheetName).slice(0, 31));
+
+  sheet.columns = columns.map((c) => ({
+    key: c.key,
+    header: c.header,
+    width: c.width,
+  }));
+
+  const headerRow = sheet.getRow(1);
+  headerRow.height = 22;
+  headerRow.eachCell((cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF305496" } };
+    cell.font = { color: { argb: "FFFFFFFF" }, bold: true };
+    cell.alignment = { horizontal: "left", vertical: "middle" };
+  });
+
+  const sigColIndex = columns.findIndex((c) => c.key === "signature");
+
+  sheetRows.forEach((r, idx) => {
+    const excelRow = sheet.addRow({
+      aidId: r.aidId,
+      name: r.name,
+      phone: r.phone,
+      code: r.code,
+      campaign: r.campaign,
+      campaignDate: r.campaignDate,
+      collectedAt: r.collectedAt,
+      printCount: r.printCount,
+      status: r.status,
+      signature: "",
+    });
+    const image = signatureImageParts(r.signature);
+    if (image && sigColIndex >= 0) {
+      excelRow.height = 38;
+      const imageId = workbook.addImage({
+        base64: image.base64,
+        extension: image.extension,
+      });
+      sheet.addImage(imageId, {
+        tl: { col: sigColIndex, row: idx + 1 },
+        ext: { width: 140, height: 46 },
+        editAs: "oneCell",
+      });
+    }
+    if (wantStatus === "all" && !r.collectedAt) {
+      excelRow.eachCell({ includeEmpty: true }, (cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+        cell.font = { color: { argb: "FF9C0006" } };
+      });
+    }
+  });
 
   const prefix =
     wantStatus === "taken"
@@ -355,6 +370,18 @@ export function downloadCollectedExcel(rows, { campaignDay, campaignName, status
     ? `-${String(campaignName).replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 40)}`
     : "";
   const fileName = `${prefix}-${dayPart}${campPart}.xlsx`;
-  XLSXStyle.writeFile(workbook, fileName);
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
   return { fileName, count: list.length, status: wantStatus };
 }

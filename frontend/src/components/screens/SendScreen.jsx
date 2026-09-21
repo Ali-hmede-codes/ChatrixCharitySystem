@@ -37,6 +37,8 @@ import {
   IconPrinter,
   IconTicket,
 } from "../common/Icons.jsx";
+import { SignaturePad } from "../common/SignaturePad.jsx";
+import { pickupIsSigned } from "../../services/signature.js";
 
 export function SendScreen() {
   const {
@@ -65,6 +67,7 @@ export function SendScreen() {
   } = useApp();
 
   const [activeTab, setActiveTab] = useState("compose"); // "compose" | "history"
+  const [signTarget, setSignTarget] = useState(null);
 
   // Campaign Compose State
   const defaultCampaignName = useMemo(() => {
@@ -354,6 +357,8 @@ export function SendScreen() {
           code: nameCodeFor(r, name) || r.code || "",
           takenAt: pickup.takenAt || null,
           takenAidId: pickup.takenAidId || "",
+          signed: Boolean(pickup.signed || pickup.signature),
+          signature: pickup.signature || "",
           familySize: people.length,
           familyNames: people,
         });
@@ -1419,7 +1424,19 @@ export function SendScreen() {
                                 type="button"
                                 className="btn-secondary btn-xs"
                                 disabled={pickupBusy}
-                                onClick={() => reprintPickup(activeCampaignDetails.id, r.phone, r.personName)}
+                                onClick={() => {
+                                  if (!pickupIsSigned(r)) {
+                                    setSignTarget({
+                                      mode: "reprint",
+                                      campaignId: activeCampaignDetails.id,
+                                      phone: r.phone,
+                                      personName: r.personName,
+                                      name: r.displayName || r.personName,
+                                    });
+                                    return;
+                                  }
+                                  reprintPickup(activeCampaignDetails.id, r.phone, r.personName);
+                                }}
                                 title="Reprint receipt"
                               >
                                 <IconPrinter className="w-3 h-3 mr-1" />
@@ -1430,8 +1447,16 @@ export function SendScreen() {
                                 type="button"
                                 className="btn-primary btn-xs"
                                 disabled={pickupBusy}
-                                onClick={() => markPickup(activeCampaignDetails.id, r.phone, r.personName)}
-                                title="Mark collected and print receipt"
+                                onClick={() =>
+                                  setSignTarget({
+                                    mode: "mark",
+                                    campaignId: activeCampaignDetails.id,
+                                    phone: r.phone,
+                                    personName: r.personName,
+                                    name: r.displayName || r.personName,
+                                  })
+                                }
+                                title="Sign, mark collected, and print receipt"
                               >
                                 <IconTicket className="w-3 h-3 mr-1" />
                                 Accept
@@ -1459,6 +1484,19 @@ export function SendScreen() {
           </div>
         </div>
       )}
+      <SignaturePad
+        open={Boolean(signTarget)}
+        personName={signTarget?.name || ""}
+        busy={pickupBusy}
+        onCancel={() => setSignTarget(null)}
+        onConfirm={(signature) => {
+          if (!signTarget) return;
+          const { mode, campaignId, phone, personName } = signTarget;
+          setSignTarget(null);
+          if (mode === "reprint") reprintPickup(campaignId, phone, personName, signature);
+          else markPickup(campaignId, phone, personName, signature);
+        }}
+      />
     </div>
   );
 }

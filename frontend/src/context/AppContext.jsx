@@ -598,6 +598,8 @@ export function AppProvider({ children }) {
             takenAt: pickup.takenAt || null,
             takenAidId: pickup.takenAidId || "",
             printCount: pickup.printCount || 0,
+            signed: Boolean(pickup.signed || pickup.signature),
+            signature: pickup.signature || item.signature || "",
           };
         }),
       }));
@@ -904,6 +906,8 @@ export function AppProvider({ children }) {
           takenAt: pickup.takenAt || null,
           takenAidId: pickup.takenAidId || "",
           printCount: pickup.printCount || 0,
+          signed: Boolean(pickup.signed || pickup.signature),
+          signature: pickup.signature || item.signature || "",
         };
       }),
     }));
@@ -1055,7 +1059,7 @@ export function AppProvider({ children }) {
 
   // Shared by the online `pickup:export-data` handler and the offline export
   // path so both produce the same Excel file + toast.
-  function handleExportData(data) {
+  async function handleExportData(data) {
     const rows = Array.isArray(data?.items) ? data.items : [];
     const wantStatus =
       data?.status === "pending" || data?.status === "all" ? data.status : "taken";
@@ -1069,21 +1073,25 @@ export function AppProvider({ children }) {
       showToast(noneMsg, "warning");
       return;
     }
-    const saved = downloadCollectedExcel(rows, {
-      campaignDay: data?.campaignDay || "all",
-      campaignName: rows.length === 1 ? rows[0].campaignName : "",
-      status: wantStatus,
-    });
-    const label =
-      wantStatus === "taken"
-        ? "collected"
-        : wantStatus === "pending"
-          ? "not-collected"
-          : "collected and not-collected";
-    showToast(`Exported ${saved.count} ${label} ${saved.count === 1 ? "person" : "people"} to Excel.`, "success");
+    try {
+      const saved = await downloadCollectedExcel(rows, {
+        campaignDay: data?.campaignDay || "all",
+        campaignName: rows.length === 1 ? rows[0].campaignName : "",
+        status: wantStatus,
+      });
+      const label =
+        wantStatus === "taken"
+          ? "collected"
+          : wantStatus === "pending"
+            ? "not-collected"
+            : "collected and not-collected";
+      showToast(`Exported ${saved.count} ${label} ${saved.count === 1 ? "person" : "people"} to Excel.`, "success");
+    } catch {
+      showToast("Could not export Excel. Try again.", "error");
+    }
   }
 
-  function markPickup(campaignId, phone, personName) {
+  function markPickup(campaignId, phone, personName, signature) {
     if (!campaignId || !phone || pickupBusyRef.current) return;
     if (!socketRef.current?.connected) {
       const snap = offlineSnapshotRef.current;
@@ -1096,7 +1104,7 @@ export function AppProvider({ children }) {
       const { snapshot, event, op } = markOffline(
         snap,
         inventoryRef.current,
-        { campaignId, phone, personName },
+        { campaignId, phone, personName, signature },
         brandingForReceipt()
       );
       commitOfflineSnapshot(snapshot);
@@ -1109,10 +1117,10 @@ export function AppProvider({ children }) {
     if (!socketRef.current) return;
     pickupBusyRef.current = true;
     setPickupBusy(true);
-    socketRef.current.emit("pickup:mark", { campaignId, phone, personName });
+    socketRef.current.emit("pickup:mark", { campaignId, phone, personName, signature });
   }
 
-  function reprintPickup(campaignId, phone, personName) {
+  function reprintPickup(campaignId, phone, personName, signature) {
     if (!campaignId || !phone || pickupBusyRef.current) return;
     if (!socketRef.current?.connected) {
       const snap = offlineSnapshotRef.current;
@@ -1125,7 +1133,7 @@ export function AppProvider({ children }) {
       const { snapshot, event, op } = reprintOffline(
         snap,
         inventoryRef.current,
-        { campaignId, phone, personName },
+        { campaignId, phone, personName, signature },
         brandingForReceipt()
       );
       commitOfflineSnapshot(snapshot);
@@ -1138,7 +1146,7 @@ export function AppProvider({ children }) {
     if (!socketRef.current) return;
     pickupBusyRef.current = true;
     setPickupBusy(true);
-    socketRef.current.emit("pickup:reprint", { campaignId, phone, personName });
+    socketRef.current.emit("pickup:reprint", { campaignId, phone, personName, signature });
   }
 
   function undoPickup(campaignId, phone, personName) {

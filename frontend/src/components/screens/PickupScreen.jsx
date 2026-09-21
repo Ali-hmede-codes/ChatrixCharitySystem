@@ -20,6 +20,8 @@ import {
   IconAlertCircle,
 } from "../common/Icons.jsx";
 import { Skeleton } from "../common/Skeleton.jsx";
+import { SignaturePad } from "../common/SignaturePad.jsx";
+import { pickupIsSigned } from "../../services/signature.js";
 
 function PickupListSkeleton({ rows = 6 }) {
   return (
@@ -136,6 +138,8 @@ export function PickupScreen() {
   const [exportStatus, setExportStatus] = useState("taken");
   const [exportDay, setExportDay] = useState("all");
   const [exportCampaignId, setExportCampaignId] = useState("");
+  const [signOpen, setSignOpen] = useState(false);
+  const [signMode, setSignMode] = useState("mark");
 
   // On mobile the confirm card is a bottom sheet that should only open when
   // the user taps a name — so we skip the "auto-select first row" behaviour on
@@ -277,6 +281,11 @@ export function PickupScreen() {
   function handleAccept() {
     if (!selected || pickupBusy) return;
     if (selected.takenAt) {
+      if (!pickupIsSigned(selected)) {
+        setSignMode("reprint");
+        setSignOpen(true);
+        return;
+      }
       const ok = window.confirm(
         `${selected.name || "This person"} already collected aid${selected.takenAidId ? ` (${selected.takenAidId})` : ""}. Print the receipt again?`
       );
@@ -288,11 +297,27 @@ export function PickupScreen() {
     if (invCount <= 0) {
       return;
     }
-    markPickup(selected.campaignId, selected.phone, selected.personName || selected.name);
+    setSignMode("mark");
+    setSignOpen(true);
+  }
+
+  function handleSignConfirm(signature) {
+    if (!selected || pickupBusy) return;
+    setSignOpen(false);
+    if (signMode === "reprint") {
+      reprintPickup(selected.campaignId, selected.phone, selected.personName || selected.name, signature);
+      return;
+    }
+    markPickup(selected.campaignId, selected.phone, selected.personName || selected.name, signature);
   }
 
   function handleReprint() {
     if (!selected || pickupBusy) return;
+    if (!pickupIsSigned(selected)) {
+      setSignMode("reprint");
+      setSignOpen(true);
+      return;
+    }
     reprintPickup(selected.campaignId, selected.phone, selected.personName || selected.name);
   }
 
@@ -353,7 +378,7 @@ export function PickupScreen() {
         <div>
           <h1 className="page-title">Aid Pickup Desk</h1>
           <p className="page-subtitle">
-            Filter by campaign date, then Accept & Print. Collected people stay listed for that date and can be exported to Excel.
+            Filter by campaign date, then sign and Accept & Print. Collected signatures are saved into the Excel export.
           </p>
         </div>
         <div className="header-actions pickup-header-stats">
@@ -659,6 +684,22 @@ export function PickupScreen() {
                         <dd>{formatReceiptTime(selected.takenAt)}</dd>
                       </div>
                     ) : null}
+                    {selected.takenAt ? (
+                      <div>
+                        <dt>Signature</dt>
+                        <dd>
+                          {pickupIsSigned(selected) ? "Signed" : "Needed before print"}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {selected.signature ? (
+                      <div className="pickup-sign-preview-row">
+                        <dt>Signed as</dt>
+                        <dd>
+                          <img className="pickup-sign-preview" src={selected.signature} alt="Collected signature" />
+                        </dd>
+                      </div>
+                    ) : null}
                     {selected.familySize > 1 ? (
                       <div>
                         <dt>Same phone</dt>
@@ -695,7 +736,7 @@ export function PickupScreen() {
                     onClick={handleAccept}
                   >
                     <IconTicket className="w-4 h-4 mr-1.5" />
-                    <span>{selected.takenAt ? "Already collected — Reprint" : "Accept & Print"}</span>
+                    <span>{selected.takenAt ? "Already collected — Reprint" : "Sign & Print"}</span>
                   </button>
                   {selected.takenAt && (
                     <>
@@ -713,7 +754,7 @@ export function PickupScreen() {
             ) : (
               <div className="pickup-confirm-empty">
                 <IconTicket className="w-8 h-8 text-slate-400 mb-2" />
-                <p>Search a beneficiary, then Accept & Print. Use campaign date to find collected people, then export them to Excel.</p>
+                <p>Search a beneficiary, then Sign & Print. Use campaign date to find collected people, then export them to Excel.</p>
               </div>
             )}
           </aside>
@@ -892,6 +933,14 @@ export function PickupScreen() {
           </button>
         </div>
       </aside>
+
+      <SignaturePad
+        open={signOpen}
+        personName={selected?.name || ""}
+        busy={pickupBusy}
+        onCancel={() => setSignOpen(false)}
+        onConfirm={handleSignConfirm}
+      />
     </div>
   );
 }

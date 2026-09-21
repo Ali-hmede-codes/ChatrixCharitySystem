@@ -18,9 +18,13 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
   },
+  optimizeDeps: {
+    include: ["exceljs"],
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      exceljs: path.resolve(__dirname, "node_modules/exceljs/dist/exceljs.min.js"),
     },
   },
 });
