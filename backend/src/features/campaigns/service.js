@@ -7,6 +7,32 @@ import { isRecipientPending, pauseCopy } from "../send/interrupt.js";
 
 const PICKUP_RESULT_LIMIT = 80;
 const MERGE_RECIPIENT_LIMIT = 5000;
+
+// Per-person pickup code lookup: returns the code that belongs to a specific
+// name on a recipient, falling back to the recipient-level code. Used so two
+// people who share one phone number each get their OWN code in their own
+// message and on their own receipt, instead of all sharing the first code.
+function nameCodeFor(recipient, name) {
+  const key = String(name || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (key && recipient?.nameCodes && typeof recipient.nameCodes === "object") {
+    const value = String(recipient.nameCodes[key] || "").trim().slice(0, 80);
+    if (value) return value;
+  }
+  return String(recipient?.code || "").trim().slice(0, 80);
+}
+
+// Coerce an incoming per-person code map into a clean { lowercasedName: code }
+// object (or null). Guards against bad shapes from the client.
+function normalizeNameCodes(input) {
+  if (!input || typeof input !== "object") return null;
+  const out = {};
+  for (const [name, code] of Object.entries(input)) {
+    const key = String(name || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const value = String(code || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    if (key && value) out[key] = value;
+  }
+  return Object.keys(out).length ? out : null;
+}
 // Recipient states that mean a message was actually sent or a final decision
 // was made — these are persisted to disk immediately so a crash can never
 // lose them (and never cause a duplicate send on resume).
@@ -198,7 +224,8 @@ export function createCampaignService(ctx) {
       familyNames,
       familySize: pickups.length,
       familyTaken: pickups.filter((p) => p.takenAt).length,
-      code: recipient.code || "",
+      // Each person's own code (falls back to the recipient-level code).
+      code: nameCodeFor(recipient, pickup.name) || recipient.code || "",
       state: recipient.state,
       channel: recipient.channel || "none",
       detail: recipient.detail || "",
@@ -222,6 +249,7 @@ export function createCampaignService(ctx) {
       familySize: pickups.length,
       familyTaken: pickups.filter((p) => p.takenAt).length,
       code: recipient.code || "",
+      nameCodes: recipient.nameCodes || null,
       state: recipient.state,
       channel: recipient.channel || "none",
       detail: recipient.detail || "",
@@ -237,7 +265,8 @@ export function createCampaignService(ctx) {
     return {
       aidId: pickup.takenAidId || "",
       name: pickup.name || "Beneficiary",
-      code: recipient.code || "",
+      // Print this person's own pickup code on their own receipt.
+      code: nameCodeFor(recipient, pickup.name) || recipient.code || "",
       campaignName: campaign.name || "",
       campaignDate: campaign.createdAt,
       takenAt: pickup.takenAt || Date.now(),
@@ -344,6 +373,7 @@ export function createCampaignService(ctx) {
           names: namesFromRecipient(r),
           name: r.name || "",
           code: r.code || "",
+          nameCodes: r.nameCodes || null,
         })),
       });
     }
@@ -370,6 +400,7 @@ export function createCampaignService(ctx) {
       names: namesFromRecipient(r),
       name: r.name || "",
       code: r.code || "",
+      nameCodes: r.nameCodes || null,
       sentNames: Array.isArray(r.sentNames) ? r.sentNames : [],
     }));
   }
@@ -439,6 +470,7 @@ export function createCampaignService(ctx) {
           if (!phone) continue;
           const names = namesFromRecipient(r);
           const code = String(r.code || "").trim();
+          const nameCodes = normalizeNameCodes(r.nameCodes);
           const existing = byPhone.get(phone);
           if (!existing) {
             byPhone.set(phone, {
@@ -446,6 +478,8 @@ export function createCampaignService(ctx) {
               name: r.name || names.join(" + ") || "",
               names,
               code,
+              // Per-person codes so shared numbers each get their own code.
+              nameCodes: nameCodes ? { ...nameCodes } : null,
               state: "queued",
               channel: "none",
               detail: "Queued for sending",
@@ -462,6 +496,12 @@ export function createCampaignService(ctx) {
             existing.names = collapsePersonNames([...existing.names, ...names]);
             existing.name = existing.names.join(" + ") || existing.name;
             if (!existing.code && code) existing.code = code;
+            // Merge per-person codes: later rows win for the same name, but a
+            // name only present in one row keeps its own code. This is what
+            // makes "Ahmad" and "Sara" sharing a phone each keep their code.
+            if (nameCodes) {
+              existing.nameCodes = { ...(existing.nameCodes || {}), ...nameCodes };
+            }
           }
         }
         for (const row of byPhone.values()) ensurePickups(row);
@@ -489,6 +529,8 @@ export function createCampaignService(ctx) {
         phone: formattedPhone,
         name: "",
         names: [],
+        code: "",
+        nameCodes: null,
         state: "pending",
         channel: "none",
         detail: "",
@@ -790,6 +832,10 @@ export function createCampaignService(ctx) {
     base.names = names;
     base.name = names.join(" + ") || winner.name || loser.name || "";
     base.code = String(base.code || extra.code || "").trim();
+    // Merge per-person codes so a person messaged in one batch keeps their
+    // own code after batches are merged (later batch wins for the same name).
+    base.nameCodes = { ...(base.nameCodes || null), ...(extra.nameCodes || null) };
+    if (!Object.keys(base.nameCodes).length) base.nameCodes = null;
     base.state = winner.state || base.state;
     base.channel = winner.channel && winner.channel !== "none" ? winner.channel : loser.channel || "none";
     base.detail = winner.detail || loser.detail || "";
@@ -938,6 +984,8 @@ export function createCampaignService(ctx) {
     if (!q) return true;
     if (matchesText(pickup.name, q)) return true;
     if (matchesText(recipient.name, q)) return true;
+    const personCode = nameCodeFor(recipient, pickup.name);
+    if (matchesText(personCode, q)) return true;
     if (matchesText(recipient.code, q)) return true;
     if (matchesText(pickup.takenAidId, q)) return true;
     if (matchesText(campaign.name, q)) return true;
@@ -947,8 +995,10 @@ export function createCampaignService(ctx) {
       if (targetDigits.includes(digitsQuery)) return true;
       const aidDigits = String(pickup.takenAidId || "").replace(/\D/g, "");
       if (aidDigits.includes(digitsQuery)) return true;
-      const codeDigits = String(recipient.code || "").replace(/\D/g, "");
+      const codeDigits = String(personCode || "").replace(/\D/g, "");
       if (codeDigits.includes(digitsQuery)) return true;
+      const recipientCodeDigits = String(recipient.code || "").replace(/\D/g, "");
+      if (recipientCodeDigits.includes(digitsQuery)) return true;
     }
     if (matchesText(recipient.phone, q)) return true;
     for (const name of recipient.names || []) {
@@ -960,7 +1010,7 @@ export function createCampaignService(ctx) {
   function pickupScore(pickup, recipient, query) {
     const q = normalizeSearch(query);
     if (!q) return 0;
-    const code = normalizeSearch(recipient.code);
+    const code = normalizeSearch(nameCodeFor(recipient, pickup.name));
     const aid = normalizeSearch(pickup.takenAidId);
     const name = normalizeSearch(pickup.name);
     if (code && code === q) return 100;
@@ -1162,6 +1212,7 @@ export function createCampaignService(ctx) {
             name: r.name || "",
             names: Array.isArray(r.names) ? r.names : pickups.map((p) => p.name),
             code: r.code || "",
+            nameCodes: r.nameCodes || null,
             state: r.state || "",
             channel: r.channel || "none",
             detail: r.detail || "",

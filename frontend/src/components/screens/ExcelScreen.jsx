@@ -89,7 +89,7 @@ export function ExcelScreen() {
 
       if (byPhone.has(key)) {
         const existing = byPhone.get(key);
-        addPersonName(existing, rawName);
+        addPersonName(existing, rawName, rawCode);
         if (rawCode && !existing.code) existing.code = rawCode;
         mergedDupes += 1;
         return;
@@ -103,8 +103,9 @@ export function ExcelScreen() {
         name: "",
         label: "",
         code: rawCode,
+        nameCodes: {},
       };
-      addPersonName(person, rawName);
+      addPersonName(person, rawName, rawCode);
       byPhone.set(key, person);
       resultList.push(person);
     });

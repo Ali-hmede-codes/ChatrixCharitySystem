@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useApp } from "../../context/AppContext.jsx";
 import { phoneKey } from "../../services/phone.js";
-import { contactSaveName, personInitials, personNames } from "../../services/names.js";
+import { contactSaveName, personInitials, personNames, nameCodeFor } from "../../services/names.js";
 import { getAvatarColor } from "../../constants/colors.js";
 import {
   IconSearch,
@@ -220,6 +220,21 @@ export function PeopleScreen() {
                   const check = waCheckMap[key];
                   const avatarBg = getAvatarColor(person.name || person.phone);
                   const initials = personInitials(person.name, person.phone);
+                  // Show each person's own code when several share one phone,
+                  // so the reviewer can confirm every code before sending.
+                  const codeDisplay = (() => {
+                    const names = personNames(person);
+                    if (names.length > 1) {
+                      const parts = names
+                        .map((n) => {
+                          const c = nameCodeFor(person, n);
+                          return c ? `${n}: ${c}` : "";
+                        })
+                        .filter(Boolean);
+                      if (parts.length) return parts.join(" · ");
+                    }
+                    return person.code || "";
+                  })();
 
                   return (
                     <tr key={`${person.phone}-${idx}`} className="table-row">
@@ -248,8 +263,8 @@ export function PeopleScreen() {
                       </td>
                       {hasAidCodes && (
                         <td>
-                          {person.code ? (
-                            <code className="aid-code-tag">{person.code}</code>
+                          {codeDisplay ? (
+                            <code className="aid-code-tag">{codeDisplay}</code>
                           ) : (
                             <span className="text-slate-400 text-xs">—</span>
                           )}

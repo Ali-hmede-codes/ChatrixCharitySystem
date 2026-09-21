@@ -19,6 +19,20 @@ import {
   shouldAutoResume,
 } from "./interrupt.js";
 
+// Coerce a per-person code map coming from the client into a clean
+// { lowercasedName: code } object, or null when empty. Guards against bad
+// shapes so the send loop never throws on a malformed payload.
+function normalizeNameCodes(input) {
+  if (!input || typeof input !== "object") return null;
+  const out = {};
+  for (const [name, code] of Object.entries(input)) {
+    const key = String(name || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const value = sanitizeAidCode(code);
+    if (key && value) out[key] = value;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 export function createSendService(ctx) {
   const delivery = createDeliveryTracker(ctx);
   let sendJob = emptyJob();
@@ -199,6 +213,7 @@ export function createSendService(ctx) {
           code: r.code,
           useNameTemplate: Boolean(b.sendOptions?.useNameTemplate),
           nameTemplate: String(b.sendOptions?.nameTemplate || ""),
+          nameCodes: r.nameCodes || null,
         });
         const batch = delivery.createBatch(b.message, {
           campaignId: b.campaignId,
@@ -239,6 +254,10 @@ export function createSendService(ctx) {
         names: namesFromRecipient(item),
         name: String(item?.name || "").trim(),
         code: sanitizeAidCode(item?.code),
+        // Per-person pickup codes (lowercased name -> code). Lets two people
+        // who share one phone number each receive their own code in their own
+        // message. Null when no code column was selected.
+        nameCodes: normalizeNameCodes(item?.nameCodes),
         sentNames: Array.isArray(item?.sentNames) ? item.sentNames : [],
       });
       if (recipients.length >= ctx.config.MAX_PEOPLE) break;
@@ -267,7 +286,15 @@ export function createSendService(ctx) {
             return extra?.code ? next.replace(/\[(?:Aid)?Code\]|\[كود\]/gi, extra.code) : next;
           });
         if (shouldSendPerPerson(names, text, extras)) {
-          return (names || []).map((name) => buildOne([name], text, extras)).filter(Boolean);
+          const nameCodes = extras?.nameCodes || null;
+          return (names || [])
+            .map((name) => {
+              const personCode = nameCodes
+                ? nameCodes[String(name).toLowerCase()] || ""
+                : extras?.code;
+              return buildOne([name], text, { ...extras, code: personCode });
+            })
+            .filter(Boolean);
         }
         const one = buildOne(names, text, extras);
         return one ? [one] : [];
@@ -748,6 +775,7 @@ export function createSendService(ctx) {
       code: recipient?.code,
       useNameTemplate,
       nameTemplate,
+      nameCodes: recipient?.nameCodes || null,
     });
     const checked = validateMessages(recipients, body, extrasFor);
     if (checked.error) {
@@ -858,6 +886,7 @@ export function createSendService(ctx) {
       code: recipient?.code,
       useNameTemplate,
       nameTemplate,
+      nameCodes: recipient?.nameCodes || null,
     });
     const checked = validateMessages(remaining, body, extrasFor);
     if (checked.error) {

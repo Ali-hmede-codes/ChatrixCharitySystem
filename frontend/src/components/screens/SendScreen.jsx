@@ -7,6 +7,7 @@ import {
   messageHasCodePlaceholder,
   messageHasNamePlaceholder,
   sanitizeAidCode,
+  nameCodeFor,
   namesEqual,
 } from "../../services/names.js";
 import { getAvatarColor } from "../../constants/colors.js";
@@ -167,6 +168,7 @@ export function SendScreen() {
       names: hasNames ? personNames(first) : [],
       name: hasNames ? first.name || "" : "",
       code: hasCodes ? sanitizeAidCode(first.code) : "",
+      nameCodes: hasCodes ? first.nameCodes || null : null,
     };
   }, [people, hasNames, hasCodes]);
 
@@ -268,12 +270,23 @@ export function SendScreen() {
     }
 
     if (messageHasCodePlaceholder(body)) {
-      const missing = people.filter((p) => !sanitizeAidCode(p.code));
+      // Per-person aware: when a recipient carries per-person codes
+      // (nameCodes), every person sharing that phone must have their own
+      // code — otherwise the launch is blocked so nobody receives someone
+      // else's code. Recipients without a nameCodes map just need the
+      // recipient-level code (old campaigns / single shared code).
+      const missing = people.filter((p) => {
+        const nc = p.nameCodes;
+        if (nc && typeof nc === "object") {
+          return personNames(p).some((n) => !sanitizeAidCode(nc[String(n).toLowerCase()]));
+        }
+        return !sanitizeAidCode(p.code);
+      });
       if (missing.length) {
         showToast(
           missing.length === people.length
             ? "The selected code column has no pickup codes. Re-import with a code column, or pick a template without [Code]."
-            : `${missing.length} recipients have no pickup code in Excel. Fill the code column, or pick a template without [Code].`,
+            : `${missing.length} recipient${missing.length === 1 ? "" : "s"} have a person with no pickup code in Excel. Fill the code column for every person, or pick a template without [Code].`,
           "warning"
         );
         return;
@@ -287,6 +300,9 @@ export function SendScreen() {
       names: hasNames ? personNames(p) : [],
       name: hasNames ? p.name || "" : "",
       code: hasCodes ? sanitizeAidCode(p.code) : "",
+      // Per-person codes so shared numbers each receive their own code in a
+      // separate message. Sent only when a code column was selected.
+      nameCodes: hasCodes ? p.nameCodes || null : null,
     }));
 
     startSend(actionable, body, {
@@ -334,6 +350,8 @@ export function SendScreen() {
           ...r,
           personName: name,
           displayName: name,
+          // Show this person's own code (falls back to the recipient code).
+          code: nameCodeFor(r, name) || r.code || "",
           takenAt: pickup.takenAt || null,
           takenAidId: pickup.takenAidId || "",
           familySize: people.length,

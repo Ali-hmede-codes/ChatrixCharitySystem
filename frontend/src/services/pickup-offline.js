@@ -12,7 +12,7 @@
 // in place. Returns the new snapshot plus a result event shaped like the
 // backend's `pickup:done` / `pickup:results` so the UI handler is shared.
 
-import { namesEqual } from "./names.js";
+import { namesEqual, nameCodeFor } from "./names.js";
 import { matchesText, normalizeSearch } from "./search.js";
 import { campaignDayKey, allocateOfflineAidId } from "./aid-id.js";
 
@@ -59,7 +59,8 @@ function publicPickup(campaign, recipient, pickup) {
     familyNames,
     familySize: pickups.length,
     familyTaken: pickups.filter((p) => p.takenAt).length,
-    code: recipient.code || "",
+    // Each person's own code (falls back to the recipient-level code).
+    code: nameCodeFor(recipient, pickup.name) || recipient.code || "",
     state: recipient.state || "",
     channel: recipient.channel || "none",
     detail: recipient.detail || "",
@@ -74,7 +75,8 @@ function buildReceipt(campaign, recipient, pickup, { reprint = false, branding =
   return {
     aidId: pickup.takenAidId || "",
     name: pickup.name || "Beneficiary",
-    code: recipient.code || "",
+    // Print this person's own pickup code on their own receipt.
+    code: nameCodeFor(recipient, pickup.name) || recipient.code || "",
     campaignName: campaign.name || "",
     campaignDate: campaign.createdAt,
     takenAt: pickup.takenAt || Date.now(),
@@ -101,6 +103,8 @@ function matchesPickupPerson(campaign, recipient, pickup, query) {
   if (!q) return true;
   if (matchesText(pickup.name, q)) return true;
   if (matchesText(recipient.name, q)) return true;
+  const personCode = nameCodeFor(recipient, pickup.name);
+  if (matchesText(personCode, q)) return true;
   if (matchesText(recipient.code, q)) return true;
   if (matchesText(pickup.takenAidId, q)) return true;
   if (matchesText(campaign.name, q)) return true;
@@ -110,8 +114,10 @@ function matchesPickupPerson(campaign, recipient, pickup, query) {
     if (targetDigits.includes(digitsQuery)) return true;
     const aidDigits = String(pickup.takenAidId || "").replace(/\D/g, "");
     if (aidDigits.includes(digitsQuery)) return true;
-    const codeDigits = String(recipient.code || "").replace(/\D/g, "");
+    const codeDigits = String(personCode || "").replace(/\D/g, "");
     if (codeDigits.includes(digitsQuery)) return true;
+    const recipientCodeDigits = String(recipient.code || "").replace(/\D/g, "");
+    if (recipientCodeDigits.includes(digitsQuery)) return true;
   }
   if (matchesText(recipient.phone, q)) return true;
   for (const name of recipient.names || []) {
@@ -123,7 +129,7 @@ function matchesPickupPerson(campaign, recipient, pickup, query) {
 function pickupScore(pickup, recipient, query) {
   const q = normalizeSearch(query);
   if (!q) return 0;
-  const code = normalizeSearch(recipient.code);
+  const code = normalizeSearch(nameCodeFor(recipient, pickup.name));
   const aid = normalizeSearch(pickup.takenAidId);
   const name = normalizeSearch(pickup.name);
   if (code && code === q) return 100;
@@ -460,6 +466,7 @@ export function applyRecipientEventToSnapshot(snapshot, event) {
         name: recipient.name || r.name,
         names: Array.isArray(recipient.names) ? recipient.names : r.names,
         code: recipient.code || r.code,
+        nameCodes: recipient.nameCodes != null ? recipient.nameCodes : r.nameCodes,
         state: recipient.state || r.state,
         channel: recipient.channel || r.channel,
         detail: recipient.detail || r.detail,

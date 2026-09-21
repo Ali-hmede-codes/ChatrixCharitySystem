@@ -101,7 +101,7 @@ export function contactSaveName(item) {
   return stripFamilyCountSuffix(item?.name);
 }
 
-export function addPersonName(person, newName) {
+export function addPersonName(person, newName, code) {
   const clean = String(newName || "").replace(/\s+/g, " ").trim();
   if (!clean) return;
 
@@ -110,6 +110,19 @@ export function addPersonName(person, newName) {
   }
 
   const incoming = splitNameField(clean);
+
+  // Record a per-person pickup code so that when several people share one
+  // phone number in the same Excel, each of them gets their OWN code in a
+  // separate message instead of all receiving the first person's code.
+  // Keyed by the lowercased raw name; the collapsed name used at send time
+  // is always one of these raw names, so the lookup never misses.
+  const cleanCode = sanitizeAidCode(code);
+  if (cleanCode) {
+    if (!person.nameCodes || typeof person.nameCodes !== "object") person.nameCodes = {};
+    for (const name of incoming) {
+      person.nameCodes[String(name).toLowerCase()] = cleanCode;
+    }
+  }
 
   for (const name of incoming) {
     if (!person.names.some((existing) => namesEqual(existing, name))) {
@@ -121,6 +134,18 @@ export function addPersonName(person, newName) {
   person.label = person.name;
 }
 
+// Look up the pickup code that belongs to a specific person on a recipient.
+// Falls back to the recipient-level code (the first row's code) when there is
+// no per-person entry — e.g. a single-person recipient or an old campaign.
+export function nameCodeFor(item, name) {
+  const key = String(name || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (key && item?.nameCodes && typeof item.nameCodes === "object") {
+    const perName = sanitizeAidCode(item.nameCodes[key]);
+    if (perName) return perName;
+  }
+  return sanitizeAidCode(item?.code);
+}
+
 export function applyPersonNameTemplate(template, name) {
   return String(template || "").replace(/\[PersonName\]/gi, name);
 }
@@ -128,7 +153,20 @@ export function applyPersonNameTemplate(template, name) {
 function buildOnePreviewMessage(names, bodyText, messageConfig, extras = {}) {
   const body = String(bodyText || "").trim();
   const nameList = Array.isArray(names) ? names.filter(Boolean) : [];
-  const code = resolveAidCode(extras.item, extras.code);
+  // Mirror the backend: when this message is for a single person and the
+  // recipient carries per-person codes (nameCodes), use THAT person's own
+  // code only — a missing code is left as the literal [Code] so the user
+  // sees the problem, instead of showing another person's code. With no
+  // per-person map (old campaign / single shared code), fall back to the
+  // recipient-level code. For one combined message to a whole family, use
+  // the recipient-level code.
+  const item = extras.item;
+  let code;
+  if (nameList.length === 1 && item?.nameCodes && typeof item.nameCodes === "object") {
+    code = sanitizeAidCode(item.nameCodes[String(nameList[0]).toLowerCase()]);
+  } else {
+    code = resolveAidCode(item, extras.code);
+  }
   let result = body;
 
   if (messageConfig?.useNameTemplate) {

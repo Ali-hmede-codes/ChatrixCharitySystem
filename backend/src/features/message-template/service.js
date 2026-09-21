@@ -86,8 +86,22 @@ export function createMessageTemplateService(ctx) {
   function buildRecipientMessages(names, body, extras = {}) {
     const nameList = Array.isArray(names) ? names.filter(Boolean) : [];
     if (shouldSendPerPerson(nameList, body, extras)) {
+      // Each person gets a SEPARATE message with their OWN pickup code.
+      // extras.nameCodes maps lowercased name -> code. When it is present
+      // (this Excel carries per-person codes) we use ONLY that person's
+      // code — a person with no code is left with the literal [Code] so
+      // validation flags it, rather than leaking another person's code.
+      // When nameCodes is absent (old campaign / single shared code) we fall
+      // back to the recipient-level extras.code so resume still works.
+      const nameCodes = extras.nameCodes || null;
       return nameList
-        .map((name) => buildRecipientMessage([name], body, extras))
+        .map((name) => {
+          const personCode = nameCodes
+            ? nameCodes[String(name).toLowerCase()] || ""
+            : extras.code;
+          const personExtras = { ...extras, code: personCode };
+          return buildRecipientMessage([name], body, personExtras);
+        })
         .filter(Boolean);
     }
     const one = buildRecipientMessage(nameList, body, extras);
