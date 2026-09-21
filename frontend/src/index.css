@@ -4739,6 +4739,17 @@ svg {
   transition: opacity 0.2s ease, transform 0.2s ease;
   z-index: 95;
   padding: 22px 22px 18px;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+
+html.sign-lock-select,
+html.sign-lock-select * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
 }
 .sign-sheet.is-open {
   opacity: 1;
@@ -4787,6 +4798,10 @@ svg {
   min-height: 180px;
   touch-action: none;
   outline: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
 }
 
 .sign-pad-hint {
@@ -4800,6 +4815,8 @@ svg {
   font-weight: 700;
   letter-spacing: 0.04em;
   pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .sign-pad-canvas {
@@ -4808,6 +4825,10 @@ svg {
   height: 100%;
   touch-action: none;
   cursor: crosshair;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
 }
 
 .sign-sheet-actions {

@@ -37,6 +37,7 @@ export function SignaturePad({
   onConfirm,
 }) {
   const canvasRef = useRef(null);
+  const wrapRef = useRef(null);
   const ctxRef = useRef(null);
   const drawingRef = useRef(false);
   const lastRef = useRef(null);
@@ -65,12 +66,45 @@ export function SignaturePad({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, busy, onCancel]);
 
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const wrap = wrapRef.current;
+    const html = document.documentElement;
+    html.classList.add("sign-lock-select");
+    const block = (event) => {
+      event.preventDefault();
+    };
+    const clearSelection = () => window.getSelection?.()?.removeAllRanges?.();
+    const opts = { passive: false };
+    wrap?.addEventListener("touchstart", block, opts);
+    wrap?.addEventListener("touchmove", block, opts);
+    wrap?.addEventListener("pointerdown", block, opts);
+    wrap?.addEventListener("pointermove", block, opts);
+    wrap?.addEventListener("contextmenu", block);
+    wrap?.addEventListener("dragstart", block);
+    document.addEventListener("selectstart", block, true);
+    document.addEventListener("selectionchange", clearSelection);
+    clearSelection();
+    return () => {
+      html.classList.remove("sign-lock-select");
+      wrap?.removeEventListener("touchstart", block, opts);
+      wrap?.removeEventListener("touchmove", block, opts);
+      wrap?.removeEventListener("pointerdown", block, opts);
+      wrap?.removeEventListener("pointermove", block, opts);
+      wrap?.removeEventListener("contextmenu", block);
+      wrap?.removeEventListener("dragstart", block);
+      document.removeEventListener("selectstart", block, true);
+      document.removeEventListener("selectionchange", clearSelection);
+    };
+  }, [open]);
+
   function startDraw(event) {
     if (busy) return;
     const canvas = canvasRef.current;
     const ctx = ctxRef.current;
     if (!canvas || !ctx) return;
     event.preventDefault();
+    window.getSelection?.()?.removeAllRanges?.();
     try {
       event.currentTarget?.setPointerCapture?.(event.pointerId);
     } catch {
@@ -132,7 +166,16 @@ export function SignaturePad({
   return (
     <>
       <div className="sign-sheet-backdrop is-open" onClick={() => !busy && onCancel?.()} aria-hidden="true" />
-      <aside className="sign-sheet is-open" role="dialog" aria-modal="true" aria-label="Signature">
+      <aside
+        className="sign-sheet is-open"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Signature"
+        onPointerDown={(event) => {
+          if (event.target.closest("button")) return;
+          event.preventDefault();
+        }}
+      >
         <button type="button" className="pickup-sheet-close" onClick={() => !busy && onCancel?.()} aria-label="Close signature">
           <IconX className="w-5 h-5" />
         </button>
@@ -150,17 +193,20 @@ export function SignaturePad({
         </div>
 
         <div
+          ref={wrapRef}
           className="sign-pad-wrap"
           role="application"
           aria-label="Signature"
-          tabIndex={0}
+          tabIndex={-1}
           onPointerDown={startDraw}
           onPointerMove={moveDraw}
           onPointerUp={endDraw}
           onPointerCancel={endDraw}
+          onLostPointerCapture={endDraw}
+          onContextMenu={(event) => event.preventDefault()}
         >
           {!hasInk && <span className="sign-pad-hint">Sign here</span>}
-          <canvas ref={canvasRef} className="sign-pad-canvas" />
+          <canvas ref={canvasRef} className="sign-pad-canvas" draggable={false} />
         </div>
 
         <div className="sign-sheet-actions">
