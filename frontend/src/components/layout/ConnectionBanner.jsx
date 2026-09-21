@@ -13,6 +13,10 @@ export function ConnectionBanner() {
     resumableCampaigns,
     resumeCampaign,
     setCurrentStep,
+    offlineReady,
+    pendingCount,
+    syncing,
+    lastSyncAt,
   } = useApp();
 
   const resumable = Array.isArray(resumableCampaigns) ? resumableCampaigns : [];
@@ -29,7 +33,8 @@ export function ConnectionBanner() {
           <strong>This screen lost Wi-Fi</strong>
           <span>
             If Chatrix is still running on this computer, sending continues in the background. Live status
-            will catch up when the browser reconnects.
+            will catch up when the browser reconnects. The Aid Pickup desk keeps working from its cached
+            list and uploads your collections when reconnected.
           </span>
         </div>
       </div>
@@ -37,6 +42,15 @@ export function ConnectionBanner() {
   }
 
   if (!socketConnected) {
+    const pickupLine = offlineReady
+      ? syncing
+        ? `Aid Pickup desk is still working offline — syncing ${pendingCount} saved change${pendingCount === 1 ? "" : "s"} now.`
+        : pendingCount > 0
+          ? `Aid Pickup desk is still working offline — ${pendingCount} change${pendingCount === 1 ? "" : "s"} saved on this device will upload when reconnected.`
+          : lastSyncAt
+            ? "Aid Pickup desk is still working offline — all changes are saved on this device."
+            : "Aid Pickup desk is still working offline — collections are saved on this device and upload when reconnected."
+      : "Aid Pickup desk needs one online visit to load its list, then it works offline.";
     return (
       <div className="connection-banner is-danger" role="status">
         <IconAlertCircle className="w-4 h-4" />
@@ -44,7 +58,7 @@ export function ConnectionBanner() {
           <strong>Lost connection to Chatrix</strong>
           <span>
             The server on this computer is unreachable. Campaign progress is saved. Keep this window open —
-            it will reconnect automatically.
+            it will reconnect automatically. {pickupLine}
           </span>
         </div>
       </div>

@@ -129,6 +129,33 @@ export const campaignsFeature = {
         }
         socket.emit("pickup:done", result);
       });
+
+      // --- Offline sync -----------------------------------------------------
+      // The desk caches a full pickup snapshot locally so it can keep working
+      // when this server is unreachable. On (re)connect it asks for a fresh
+      // snapshot; after collecting offline it replays its queued ops here.
+      socket.on("pickup:hydrate", () => {
+        socket.emit("pickup:snapshot", campaigns.buildPickupSnapshot());
+      });
+
+      socket.on("pickup:apply-offline", async (payload) => {
+        const ops = Array.isArray(payload?.ops) ? payload.ops : [];
+        const results = [];
+        for (const op of ops) {
+          if (!op || typeof op !== "object") continue;
+          try {
+            const result = await campaigns.applyOfflineOp(op);
+            results.push({ op, result });
+          } catch (err) {
+            ctx.logger?.error?.({ err }, "apply-offline op failed");
+            results.push({ op, result: { ok: false, error: "Server error applying offline change." } });
+          }
+        }
+        // Acknowledge this client with per-op outcomes (conflicts included).
+        socket.emit("pickup:apply-offline:done", { results });
+        // Broadcast a fresh snapshot so every tab reconciles its cache.
+        ctx.io.emit("pickup:snapshot", campaigns.buildPickupSnapshot());
+      });
     });
   },
 };

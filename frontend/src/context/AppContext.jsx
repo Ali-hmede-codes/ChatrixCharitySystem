@@ -5,6 +5,24 @@ import { DEFAULT_NAME_TEMPLATE, MAX_PEOPLE } from "../constants/config.js";
 import { printReceipt } from "../services/receipt.js";
 import { namesEqual } from "../services/names.js";
 import { downloadCollectedExcel } from "../services/excel.js";
+import {
+  saveSnapshot,
+  loadSnapshot,
+  enqueueOp,
+  listQueue,
+  removeFromQueue,
+  clearQueue,
+  queueCount,
+} from "../services/offline-db.js";
+import {
+  searchPickupOffline,
+  exportOffline,
+  markOffline,
+  reprintOffline,
+  undoOffline,
+  applyRecipientEventToSnapshot,
+  applyInventoryToSnapshot,
+} from "../services/pickup-offline.js";
 
 const AppContext = createContext(null);
 
@@ -82,6 +100,19 @@ export function AppProvider({ children }) {
     items: [],
   });
 
+  // Offline Aid Pickup cache + queue. The desk keeps working when the server
+  // (Socket.io) is unreachable by searching/collecting against a cached
+  // snapshot, then replaying the queued ops on reconnect. See
+  // services/offline-db.js and services/pickup-offline.js.
+  const [offlineSnapshot, setOfflineSnapshot] = useState(null);
+  const [offlineReady, setOfflineReady] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSyncAt, setLastSyncAt] = useState(null);
+  const offlineSnapshotRef = useRef(null);
+  const brandRef = useRef(brand);
+  const syncingRef = useRef(false);
+
   // Sending Job & Delivery
   const [sendJob, setSendJob] = useState({
     running: false,
@@ -120,6 +151,55 @@ export function AppProvider({ children }) {
   useEffect(() => {
     inventoryRef.current = inventory;
   }, [inventory]);
+
+  // Debounced persistence of the offline cache. We do NOT write on every
+  // `campaigns:recipient` event (those fire per-recipient during a send and
+  // would hammer IndexedDB). The queue itself is durable (each op is written
+  // immediately when enqueued), so a delayed cache write never loses a
+  // collection — the next `pickup:snapshot` on reconnect reconstructs it.
+  const snapshotSaveTimerRef = useRef(null);
+  function scheduleSnapshotSave() {
+    if (snapshotSaveTimerRef.current) return;
+    snapshotSaveTimerRef.current = setTimeout(() => {
+      snapshotSaveTimerRef.current = null;
+      if (offlineSnapshotRef.current) saveSnapshot(offlineSnapshotRef.current);
+    }, 1500);
+  }
+
+  useEffect(() => {
+    offlineSnapshotRef.current = offlineSnapshot;
+    if (offlineSnapshot) {
+      setOfflineReady(true);
+      scheduleSnapshotSave();
+    }
+  }, [offlineSnapshot]);
+
+  useEffect(() => {
+    brandRef.current = brand;
+  }, [brand]);
+
+  // Load the cached snapshot + pending queue count on first mount so the
+  // desk works immediately even if the page is opened while offline.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const snap = await loadSnapshot();
+      if (cancelled) return;
+      if (snap) {
+        setOfflineSnapshot(snap);
+        setOfflineReady(true);
+        // Keep the live inventory in sync with the cache on a cold start
+        // so the stock badge matches what was last persisted.
+        if (snap.inventory) setInventory(snap.inventory);
+      }
+      const count = await queueCount();
+      if (cancelled) return;
+      setPendingCount(count);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
 
   // Network / Wifi offline listener
@@ -162,6 +242,7 @@ export function AppProvider({ children }) {
       socket.emit("send:sync");
       socket.emit("printer:get");
       socket.emit("inventory:get");
+      socket.emit("pickup:hydrate");
       if (hadConnectionRef.current) {
         showToast("Reconnected to Chatrix. Campaigns and send status refreshed.", "success");
       }
@@ -520,6 +601,11 @@ export function AppProvider({ children }) {
           };
         }),
       }));
+      // Keep the offline cache fresh while online so a later disconnect
+      // reflects the most recent collections.
+      setOfflineSnapshot((current) =>
+        current ? applyRecipientEventToSnapshot(current, event) : current
+      );
     });
 
     socket.on("pickup:results", (data) => {
@@ -535,108 +621,43 @@ export function AppProvider({ children }) {
       setPickupLoading(false);
     });
 
-    socket.on("pickup:export-data", (data) => {
-      const rows = Array.isArray(data?.items) ? data.items : [];
-      const wantStatus =
-        data?.status === "pending" || data?.status === "all" ? data.status : "taken";
-      if (!rows.length) {
-        const noneMsg =
-          wantStatus === "taken"
-            ? "No collected people match this campaign date to export."
-            : wantStatus === "pending"
-              ? "No not-collected people match this campaign date to export."
-              : "No people match this campaign date to export.";
-        showToast(noneMsg, "warning");
-        return;
-      }
-      const saved = downloadCollectedExcel(rows, {
-        campaignDay: data?.campaignDay || "all",
-        campaignName: rows.length === 1 ? rows[0].campaignName : "",
-        status: wantStatus,
-      });
-      const label =
-        wantStatus === "taken"
-          ? "collected"
-          : wantStatus === "pending"
-            ? "not-collected"
-            : "collected and not-collected";
-      showToast(`Exported ${saved.count} ${label} ${saved.count === 1 ? "person" : "people"} to Excel.`, "success");
+    socket.on("pickup:export-data", (data) => handleExportData(data));
+
+    socket.on("pickup:done", (event) => applyPickupDone(event));
+
+    socket.on("pickup:snapshot", (data) => {
+      if (!data || typeof data !== "object") return;
+      const snap = {
+        savedAt: Date.now(),
+        campaigns: Array.isArray(data.campaigns) ? data.campaigns : [],
+        inventory:
+          data.inventory && typeof data.inventory === "object"
+            ? data.inventory
+            : { count: 0, label: "Aid portions", updatedAt: null },
+      };
+      setOfflineSnapshot(snap);
+      if (snap.inventory) setInventory(snap.inventory);
     });
 
-    socket.on("pickup:done", (event) => {
-      pickupBusyRef.current = false;
-      setPickupBusy(false);
-      if (event?.inventory) {
-        setInventory(event.inventory);
-      }
-      if (!event?.ok) {
-        showToast(event?.error || "Could not update pickup.", "error");
-        return;
-      }
-      if (event.undone) {
-        // Revert the person to "not collected" in the list right away. The
-        // backend also broadcasts `campaigns:recipient`, but if that event
-        // didn't refresh this particular row (e.g. a family member name
-        // mismatch), the confirm pane would still show "Undo collected" and
-        // the operator would think the undo didn't work. So apply the
-        // undone recipient directly here as a guaranteed fallback.
-        const r = event.recipient;
-        if (r && r.campaignId && r.phone) {
-          setPickupResults((current) => ({
-            ...current,
-            items: (current.items || []).map((item) => {
-              if (
-                item.campaignId !== r.campaignId ||
-                item.phone !== r.phone ||
-                !namesEqual(item.personName || item.name, r.personName || r.name)
-              ) {
-                return item;
-              }
-              return {
-                ...item,
-                takenAt: r.takenAt || null,
-                takenAidId: r.takenAidId || "",
-                printCount: r.printCount || 0,
-              };
-            }),
-          }));
-        }
-        showToast("Marked as not collected. The same aid ID will be reused if they collect again.", "info");
-        return;
-      }
-      const receipt = event.receipt;
-      if (receipt && event.reprint) {
-        printReceipt(receipt, printerSettingsRef.current);
-        showToast(`Reprinting ${receipt.aidId}`, "success");
-        return;
-      }
-      if (receipt && !event.alreadyTaken) {
-        printReceipt(receipt, printerSettingsRef.current);
-        const inv = event.inventory;
-        const low = inv && inv.count > 0 && inv.count < 20;
-        showToast(
-          low
-            ? `Collected · ${receipt.aidId} · printing receipt. ⚠ Only ${inv.count} ${inv.label || "aid"} left in inventory.`
-            : `Collected · ${receipt.aidId} · printing receipt`,
-          low ? "warning" : "success"
-        );
-        return;
-      }
-      if (event.alreadyTaken) {
-        const who = event.recipient?.name || "This person";
-        const id = event.receipt?.aidId ? ` (${event.receipt.aidId})` : "";
-        showToast(`${who} already collected aid${id}. Reprint if the paper is missing.`, "warning");
-      }
+    socket.on("pickup:apply-offline:done", (data) => {
+      // Server finished replaying our queued ops. Clear the ones it accepted;
+      // any conflict is surfaced per-op. The fresh `pickup:snapshot` broadcast
+      // (sent right after by the server) reconciles the cache.
+      handleApplyOfflineDone(data);
     });
 
     socket.on("inventory:state", (data) => {
       if (!data) return;
-      setInventory({ count: Number(data.count) || 0, label: data.label || "Aid portions", updatedAt: data.updatedAt || null });
+      const inv = { count: Number(data.count) || 0, label: data.label || "Aid portions", updatedAt: data.updatedAt || null };
+      setInventory(inv);
+      setOfflineSnapshot((current) => (current ? applyInventoryToSnapshot(current, inv) : current));
     });
 
     socket.on("inventory:saved", (data) => {
       if (!data) return;
-      setInventory({ count: Number(data.count) || 0, label: data.label || "Aid portions", updatedAt: data.updatedAt || null });
+      const inv = { count: Number(data.count) || 0, label: data.label || "Aid portions", updatedAt: data.updatedAt || null };
+      setInventory(inv);
+      setOfflineSnapshot((current) => (current ? applyInventoryToSnapshot(current, inv) : current));
       showToast(`Inventory updated · ${data.count} ${data.label || "aid"} in stock.`, "success");
     });
 
@@ -651,6 +672,22 @@ export function AppProvider({ children }) {
       socket.disconnect();
     };
   }, []);
+
+  // On (re)connect: replay queued offline ops. On disconnect: persist the
+  // cache immediately so a reload right after losing the server still has
+  // the latest data.
+  useEffect(() => {
+    if (!socketConnected) {
+      if (snapshotSaveTimerRef.current) {
+        clearTimeout(snapshotSaveTimerRef.current);
+        snapshotSaveTimerRef.current = null;
+      }
+      if (offlineSnapshotRef.current) saveSnapshot(offlineSnapshotRef.current);
+      return;
+    }
+    flushOfflineQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socketConnected]);
 
   useEffect(() => {
     if (currentStep !== "boot") return undefined;
@@ -817,33 +854,316 @@ export function AppProvider({ children }) {
     socketRef.current.emit("campaigns:merge", { ids: list, name });
   }
 
+  function brandingForReceipt() {
+    return {
+      logoUrl: brandRef.current?.url || "",
+      headerText: printerSettingsRef.current?.headerText || "",
+      paperWidthMm: printerSettingsRef.current?.paperWidthMm || 80,
+    };
+  }
+
+  // Commit a new offline cache snapshot: update the ref synchronously (so a
+  // rapid second offline op reads the already-mutated cache) and the state
+  // (for render). The debounced persistence runs via the snapshot effect.
+  function commitOfflineSnapshot(snapshot) {
+    if (!snapshot) return;
+    offlineSnapshotRef.current = snapshot;
+    setOfflineSnapshot(snapshot);
+  }
+
+  // Refresh the visible pickup list from a recipient payload (publicPickup
+  // shape). Used by the offline path because, unlike online, no
+  // `campaigns:recipient` event arrives to update the rows. Also called on
+  // the online path — it's idempotent with the `campaigns:recipient` update.
+  function updatePickupResultsFromRecipient(recipient) {
+    if (!recipient || !recipient.campaignId || !recipient.phone) return;
+    const pickups = Array.isArray(recipient.pickups) ? recipient.pickups : [];
+    const personName = recipient.personName || recipient.name;
+    setPickupResults((current) => ({
+      ...current,
+      items: (current.items || []).map((item) => {
+        if (item.campaignId !== recipient.campaignId || item.phone !== recipient.phone) return item;
+        const pickup = pickups.find((p) => namesEqual(p.name, personName));
+        if (!pickup) {
+          return {
+            ...item,
+            pickups,
+            familyNames: pickups.map((p) => p.name),
+            familySize: pickups.length,
+            familyTaken: pickups.filter((p) => p.takenAt).length,
+          };
+        }
+        return {
+          ...item,
+          pickups,
+          familyNames: pickups.map((p) => p.name),
+          familySize: pickups.length,
+          familyTaken: pickups.filter((p) => p.takenAt).length,
+          name: pickup.name || personName,
+          personName: pickup.name || personName,
+          takenAt: pickup.takenAt || null,
+          takenAidId: pickup.takenAidId || "",
+          printCount: pickup.printCount || 0,
+        };
+      }),
+    }));
+  }
+
+  // Shared handler for the backend `pickup:done` event AND the offline path.
+  // Keeps online and offline behaviour identical (busy clear, inventory
+  // update, receipt print, toasts, list refresh).
+  function applyPickupDone(event) {
+    pickupBusyRef.current = false;
+    setPickupBusy(false);
+    if (event?.inventory) {
+      // Update the ref synchronously so a rapid second offline collection
+      // reads the already-decremented stock (the state update + ref effect
+      // would otherwise lag by one render).
+      inventoryRef.current = event.inventory;
+      setInventory(event.inventory);
+    }
+    if (!event?.ok) {
+      showToast(event?.error || "Could not update pickup.", "error");
+      return;
+    }
+    updatePickupResultsFromRecipient(event.recipient);
+    if (event.undone) {
+      showToast("Marked as not collected. The same aid ID will be reused if they collect again.", "info");
+      return;
+    }
+    const receipt = event.receipt;
+    if (receipt && event.reprint) {
+      printReceipt(receipt, printerSettingsRef.current);
+      showToast(`Reprinting ${receipt.aidId}`, "success");
+      return;
+    }
+    if (receipt && !event.alreadyTaken) {
+      printReceipt(receipt, printerSettingsRef.current);
+      const inv = event.inventory;
+      const low = inv && inv.count > 0 && inv.count < 20;
+      showToast(
+        low
+          ? `Collected · ${receipt.aidId} · printing receipt. ⚠ Only ${inv.count} ${inv.label || "aid"} left in inventory.`
+          : `Collected · ${receipt.aidId} · printing receipt`,
+        low ? "warning" : "success"
+      );
+      return;
+    }
+    if (event.alreadyTaken) {
+      const who = event.recipient?.name || "This person";
+      const id = event.receipt?.aidId ? ` (${event.receipt.aidId})` : "";
+      showToast(`${who} already collected aid${id}. Reprint if the paper is missing.`, "warning");
+    }
+  }
+
+  async function refreshPendingCount() {
+    const count = await queueCount();
+    setPendingCount(count);
+  }
+
+  // Replay queued offline ops to the server. Idempotent: the server's
+  // applyOfflineOp is safe to re-apply, so a dropped ack just retries on the
+  // next reconnect.
+  async function flushOfflineQueue() {
+    if (syncingRef.current) return;
+    const socket = socketRef.current;
+    if (!socket || !socket.connected) return;
+    const ops = await listQueue();
+    if (!ops.length) return;
+    syncingRef.current = true;
+    setSyncing(true);
+    // Tag each op with its queue id so the server's ack can tell us which to
+    // remove. The server ignores unknown fields and echoes `op` back.
+    const tagged = ops.map((entry) => ({ ...entry, clientId: entry.id }));
+    socket.emit("pickup:apply-offline", { ops: tagged });
+  }
+
+  async function handleApplyOfflineDone(data) {
+    syncingRef.current = false;
+    setSyncing(false);
+    const results = Array.isArray(data?.results) ? data.results : [];
+    let conflicts = 0;
+    let errors = 0;
+    for (const item of results) {
+      const op = item?.op;
+      const result = item?.result;
+      if (result?.ok) {
+        if (result.conflict) conflicts += 1;
+        if (op?.clientId != null) await removeFromQueue(op.clientId);
+      } else {
+        errors += 1;
+      }
+    }
+    await refreshPendingCount();
+    setLastSyncAt(Date.now());
+    if (errors > 0) {
+      showToast(
+        `${errors} change${errors === 1 ? "" : "s"} could not sync yet. They stay queued and will retry on the next reconnect.`,
+        "warning"
+      );
+    } else if (conflicts > 0) {
+      showToast(
+        `${conflicts} change${conflicts === 1 ? "" : "s"} synced with a conflict — the server already had a newer record, so its version was kept.`,
+        "warning"
+      );
+    } else if (results.length > 0) {
+      showToast("Offline changes synced to Chatrix.", "success");
+    }
+  }
+
   function searchPickup(payload = {}) {
+    if (!socketRef.current?.connected) {
+      const snap = offlineSnapshotRef.current;
+      if (!snap) {
+        setPickupLoading(false);
+        setPickupResults({
+          query: "",
+          scope: "all",
+          campaignDay: "all",
+          campaignId: "",
+          status: "all",
+          total: 0,
+          items: [],
+        });
+        return;
+      }
+      setPickupLoading(true);
+      const result = searchPickupOffline(snap, payload);
+      setPickupResults(result);
+      setPickupLoading(false);
+      return;
+    }
     if (!socketRef.current) return;
     setPickupLoading(true);
     socketRef.current.emit("pickup:search", payload);
   }
 
   function exportCollected(payload = {}) {
+    if (!socketRef.current?.connected) {
+      const snap = offlineSnapshotRef.current;
+      if (!snap) {
+        showToast("No cached pickup list to export. Connect once online to load it.", "warning");
+        return;
+      }
+      const result = exportOffline(snap, payload);
+      handleExportData(result);
+      return;
+    }
     if (!socketRef.current) return;
     socketRef.current.emit("pickup:export", payload);
   }
 
+  // Shared by the online `pickup:export-data` handler and the offline export
+  // path so both produce the same Excel file + toast.
+  function handleExportData(data) {
+    const rows = Array.isArray(data?.items) ? data.items : [];
+    const wantStatus =
+      data?.status === "pending" || data?.status === "all" ? data.status : "taken";
+    if (!rows.length) {
+      const noneMsg =
+        wantStatus === "taken"
+          ? "No collected people match this campaign date to export."
+          : wantStatus === "pending"
+            ? "No not-collected people match this campaign date to export."
+            : "No people match this campaign date to export.";
+      showToast(noneMsg, "warning");
+      return;
+    }
+    const saved = downloadCollectedExcel(rows, {
+      campaignDay: data?.campaignDay || "all",
+      campaignName: rows.length === 1 ? rows[0].campaignName : "",
+      status: wantStatus,
+    });
+    const label =
+      wantStatus === "taken"
+        ? "collected"
+        : wantStatus === "pending"
+          ? "not-collected"
+          : "collected and not-collected";
+    showToast(`Exported ${saved.count} ${label} ${saved.count === 1 ? "person" : "people"} to Excel.`, "success");
+  }
+
   function markPickup(campaignId, phone, personName) {
-    if (!socketRef.current || !campaignId || !phone || pickupBusyRef.current) return;
+    if (!campaignId || !phone || pickupBusyRef.current) return;
+    if (!socketRef.current?.connected) {
+      const snap = offlineSnapshotRef.current;
+      if (!snap) {
+        showToast("No cached pickup list. Connect once online to load it, then it works offline.", "warning");
+        return;
+      }
+      pickupBusyRef.current = true;
+      setPickupBusy(true);
+      const { snapshot, event, op } = markOffline(
+        snap,
+        inventoryRef.current,
+        { campaignId, phone, personName },
+        brandingForReceipt()
+      );
+      commitOfflineSnapshot(snapshot);
+      if (op) {
+        enqueueOp(op).then(() => refreshPendingCount());
+      }
+      applyPickupDone(event);
+      return;
+    }
+    if (!socketRef.current) return;
     pickupBusyRef.current = true;
     setPickupBusy(true);
     socketRef.current.emit("pickup:mark", { campaignId, phone, personName });
   }
 
   function reprintPickup(campaignId, phone, personName) {
-    if (!socketRef.current || !campaignId || !phone || pickupBusyRef.current) return;
+    if (!campaignId || !phone || pickupBusyRef.current) return;
+    if (!socketRef.current?.connected) {
+      const snap = offlineSnapshotRef.current;
+      if (!snap) {
+        showToast("No cached pickup list. Connect once online to load it, then it works offline.", "warning");
+        return;
+      }
+      pickupBusyRef.current = true;
+      setPickupBusy(true);
+      const { snapshot, event, op } = reprintOffline(
+        snap,
+        inventoryRef.current,
+        { campaignId, phone, personName },
+        brandingForReceipt()
+      );
+      commitOfflineSnapshot(snapshot);
+      if (op) {
+        enqueueOp(op).then(() => refreshPendingCount());
+      }
+      applyPickupDone(event);
+      return;
+    }
+    if (!socketRef.current) return;
     pickupBusyRef.current = true;
     setPickupBusy(true);
     socketRef.current.emit("pickup:reprint", { campaignId, phone, personName });
   }
 
   function undoPickup(campaignId, phone, personName) {
-    if (!socketRef.current || !campaignId || !phone || pickupBusyRef.current) return;
+    if (!campaignId || !phone || pickupBusyRef.current) return;
+    if (!socketRef.current?.connected) {
+      const snap = offlineSnapshotRef.current;
+      if (!snap) {
+        showToast("No cached pickup list. Connect once online to load it, then it works offline.", "warning");
+        return;
+      }
+      pickupBusyRef.current = true;
+      setPickupBusy(true);
+      const { snapshot, event, op } = undoOffline(
+        snap,
+        inventoryRef.current,
+        { campaignId, phone, personName }
+      );
+      commitOfflineSnapshot(snapshot);
+      if (op) {
+        enqueueOp(op).then(() => refreshPendingCount());
+      }
+      applyPickupDone(event);
+      return;
+    }
+    if (!socketRef.current) return;
     pickupBusyRef.current = true;
     setPickupBusy(true);
     socketRef.current.emit("pickup:undo", { campaignId, phone, personName });
@@ -953,6 +1273,13 @@ export function AppProvider({ children }) {
     savePrinter,
     uploadLogo,
     clearLogo,
+    // Offline Aid Pickup support
+    offlineReady,
+    offlineSnapshot,
+    pendingCount,
+    syncing,
+    lastSyncAt,
+    flushOfflineQueue,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

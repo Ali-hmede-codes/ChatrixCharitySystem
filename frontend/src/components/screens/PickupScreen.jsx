@@ -52,6 +52,10 @@ export function PickupScreen() {
     campaigns = [],
     socketConnected,
     inventory,
+    offlineReady,
+    pendingCount,
+    syncing,
+    lastSyncAt,
   } = useApp();
 
   const todayKey = campaignDayKey(Date.now());
@@ -97,9 +101,12 @@ export function PickupScreen() {
   );
 
   useEffect(() => {
-    if (!socketConnected || pickupBusy) return;
+    if (pickupBusy) return;
+    // searchPickup handles both paths: online (socket) and offline (cache).
+    // Re-run when connection state or cache readiness changes so the list
+    // stays correct across connect/disconnect and after the cache loads.
     searchPickup(searchPayload);
-  }, [searchPayload, socketConnected, pickupBusy]);
+  }, [searchPayload, pickupBusy, socketConnected, offlineReady]);
 
   const items = useMemo(() => {
     let list = pickupResults.items || [];
@@ -239,6 +246,9 @@ export function PickupScreen() {
   }
 
   function emptyCopy() {
+    if (!socketConnected && !offlineReady) {
+      return "Offline with no cached pickup list yet. Open this desk once while online to load the list, then it keeps working offline and uploads your collections when Wi-Fi returns.";
+    }
     if (campaigns.length === 0) {
       return "No campaigns yet. Send an outreach campaign first, then people can collect aid here.";
     }
@@ -273,11 +283,31 @@ export function PickupScreen() {
             {campaignDay !== "all" ? ` · ${formatCampaignDay(campaignDay)}` : ""}
           </span>
           <span className="chip-badge chip-warning">{printerSettings.paperWidthMm} mm paper</span>
+          {!socketConnected && (
+            <span
+              className={`chip-badge ${pendingCount > 0 ? "chip-warning" : "chip-info"}`}
+              title={
+                offlineReady
+                  ? "Wi-Fi/server is offline. Collections are saved on this device and upload automatically when reconnected."
+                  : "Offline with no cached list yet. Connect once online to load it, then it works offline."
+              }
+            >
+              {syncing
+                ? `Syncing ${pendingCount}…`
+                : !offlineReady
+                  ? "Offline · no cache"
+                  : pendingCount > 0
+                    ? `Offline · ${pendingCount} queued`
+                    : lastSyncAt
+                      ? "Offline · all synced"
+                      : "Offline · ready"}
+            </span>
+          )}
           <button
             type="button"
             className="btn-primary"
             onClick={openExport}
-            disabled={!socketConnected || campaigns.length === 0}
+            disabled={(!socketConnected && !offlineReady) || campaigns.length === 0}
           >
             <IconSpreadsheet className="w-4 h-4 mr-1.5" />
             <span>Export</span>
@@ -729,7 +759,7 @@ export function PickupScreen() {
             type="button"
             className="btn-primary"
             onClick={runExport}
-            disabled={!socketConnected || exportScope.total === 0}
+            disabled={(!socketConnected && !offlineReady) || exportScope.total === 0}
           >
             <IconSpreadsheet className="w-4 h-4 mr-1.5" />
             <span>Export Excel</span>

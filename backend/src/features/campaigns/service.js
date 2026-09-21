@@ -2,7 +2,7 @@ import { createCampaignRepository } from "./repository.js";
 import { plusPhone } from "../../shared/phone.js";
 import { namesFromRecipient, namesEqual, personSlots, uniquePersonNames, collapsePersonNames } from "../../shared/names.js";
 import { matchesText, normalizeSearch } from "../../shared/search.js";
-import { campaignDayKey, formatAidId, maxAidSeqForDay } from "../../shared/aid-id.js";
+import { campaignDayKey, formatAidId, maxAidSeqForDay, parseAidSeq } from "../../shared/aid-id.js";
 import { isRecipientPending, pauseCopy } from "../send/interrupt.js";
 
 const PICKUP_RESULT_LIMIT = 80;
@@ -1140,6 +1140,188 @@ export function createCampaignService(ctx) {
     };
   }
 
+  // --- Offline sync ----------------------------------------------------------
+  // The pickup desk can collect while the server (Socket.io) is unreachable.
+  // The frontend caches a snapshot of all campaigns/recipients/pickups and
+  // queues mark/reprint/undo ops; on reconnect it replays them here. The
+  // server ADOPTS the client-supplied takenAt/takenAidId so the printed
+  // receipt and the database record never disagree. Conflicts (the same
+  // person already collected from another session) are resolved
+  // server-wins: we keep the existing record and tell the client to refresh.
+
+  function buildPickupSnapshot() {
+    return {
+      campaigns: campaigns.map((c) => ({
+        id: c.id,
+        name: c.name,
+        createdAt: c.createdAt,
+        recipients: (c.recipients || []).map((r) => {
+          const pickups = ensurePickups(r);
+          return {
+            phone: r.phone,
+            name: r.name || "",
+            names: Array.isArray(r.names) ? r.names : pickups.map((p) => p.name),
+            code: r.code || "",
+            state: r.state || "",
+            channel: r.channel || "none",
+            detail: r.detail || "",
+            pickups: pickups.map((p) => ({
+              name: p.name,
+              takenAt: p.takenAt || null,
+              takenAidId: p.takenAidId || "",
+              printCount: p.printCount || 0,
+            })),
+          };
+        }),
+      })),
+      inventory:
+        ctx.services.inventory?.publicState?.() || { count: 0, label: "Aid portions", updatedAt: null },
+    };
+  }
+
+  // Apply one queued offline operation. Idempotent: re-applying a mark that
+  // already matches is a no-op success; a mark that conflicts with an
+  // existing different collection keeps the server record and returns
+  // `conflict: true` so the client refreshes its cache.
+  async function applyOfflineOp(op) {
+    const type = String(op?.op || "");
+    const campaignId = String(op?.campaignId || "");
+    const campaign = campaigns.find((c) => c.id === campaignId);
+    if (!campaign) return { ok: false, error: "Campaign not found.", conflict: false };
+    const target = findRecipient(campaign, op?.phone);
+    if (!target) return { ok: false, error: "Person not found in this campaign.", conflict: false };
+    const pickup = findPickup(target, op?.personName);
+    if (!pickup) {
+      return {
+        ok: false,
+        error: "Choose which family member is collecting. Each person gets their own bill.",
+        conflict: false,
+      };
+    }
+
+    if (type === "mark") {
+      const wantAidId = String(op?.takenAidId || "").trim();
+      const wantAt = Number(op?.takenAt) || Date.now();
+
+      // Already collected with the SAME offline id -> idempotent replay.
+      if (pickup.takenAt && pickup.takenAidId === wantAidId) {
+        return {
+          ok: true,
+          alreadyTaken: true,
+          reprint: false,
+          conflict: false,
+          receipt: buildReceipt(campaign, target, pickup, { reprint: true }),
+          recipient: publicPickup(campaign, target, pickup),
+          inventory: ctx.services.inventory?.publicState?.() || null,
+        };
+      }
+      // Already collected with a DIFFERENT id -> another session got there
+      // first. Keep the server record; tell the client to refresh.
+      if (pickup.takenAt) {
+        return {
+          ok: true,
+          alreadyTaken: true,
+          reprint: false,
+          conflict: true,
+          receipt: buildReceipt(campaign, target, pickup, { reprint: true }),
+          recipient: publicPickup(campaign, target, pickup),
+          inventory: ctx.services.inventory?.publicState?.() || null,
+        };
+      }
+
+      // Adopt the client-supplied Aid ID and timestamp.
+      pickup.takenAidId = wantAidId || allocateAidId(campaign);
+      pickup.takenAt = wantAt;
+      pickup.printCount = (Number(pickup.printCount) || 0) + 1;
+      target.updatedAt = Date.now();
+      // Make sure the per-day sequence counter is past this offline id so a
+      // future online allocation never collides with it.
+      const dayKey = campaignDayKey(campaign.createdAt);
+      const adoptedSeq = parseAidSeq(pickup.takenAidId, dayKey);
+      if (adoptedSeq > 0) {
+        const stored = Number(aidSeq[dayKey]) || 0;
+        if (adoptedSeq > stored) {
+          aidSeq = { ...aidSeq, [dayKey]: adoptedSeq };
+          scheduleSeqSave();
+        }
+      }
+      ensurePickups(target);
+      recountStats(campaign);
+      await persistNow();
+      emitRecipient(campaign, target, pickup);
+      let inventory = ctx.services.inventory?.publicState?.() || null;
+      if (ctx.services.inventory) {
+        inventory = await ctx.services.inventory.decrement();
+      }
+      return {
+        ok: true,
+        alreadyTaken: false,
+        reprint: false,
+        conflict: false,
+        receipt: buildReceipt(campaign, target, pickup, { reprint: false }),
+        recipient: publicPickup(campaign, target, pickup),
+        inventory,
+      };
+    }
+
+    if (type === "reprint") {
+      if (!pickup.takenAt || !pickup.takenAidId) {
+        return { ok: false, error: "This person has not collected aid yet.", conflict: false };
+      }
+      // Use max(current, target) so a replayed (lost-ack) reprint op is
+      // idempotent and never inflates the count beyond what was printed.
+      const target = Number(op?.printCount) || 0;
+      const current = Number(pickup.printCount) || 1;
+      pickup.printCount = target > current ? target : current + 1;
+      target.updatedAt = Date.now();
+      ensurePickups(target);
+      await persistNow();
+      emitRecipient(campaign, target, pickup);
+      return {
+        ok: true,
+        alreadyTaken: true,
+        reprint: true,
+        conflict: false,
+        receipt: buildReceipt(campaign, target, pickup, { reprint: true }),
+        recipient: publicPickup(campaign, target, pickup),
+        inventory: ctx.services.inventory?.publicState?.() || null,
+      };
+    }
+
+    if (type === "undo") {
+      if (!pickup.takenAt) {
+        // Idempotent: already not collected.
+        return {
+          ok: true,
+          undone: true,
+          conflict: false,
+          recipient: publicPickup(campaign, target, pickup),
+          inventory: ctx.services.inventory?.publicState?.() || null,
+        };
+      }
+      pickup.takenAt = null;
+      target.takenAt = null;
+      target.updatedAt = Date.now();
+      ensurePickups(target);
+      recountStats(campaign);
+      await persistNow();
+      emitRecipient(campaign, target, pickup);
+      let inventory = ctx.services.inventory?.publicState?.() || null;
+      if (ctx.services.inventory) {
+        inventory = await ctx.services.inventory.increment();
+      }
+      return {
+        ok: true,
+        undone: true,
+        conflict: false,
+        recipient: publicPickup(campaign, target, pickup),
+        inventory,
+      };
+    }
+
+    return { ok: false, error: `Unknown offline op: ${type}`, conflict: false };
+  }
+
   return {
     list,
     listResumable,
@@ -1166,5 +1348,7 @@ export function createCampaignService(ctx) {
     reprintTaken,
     undoTaken,
     isPickupTaken,
+    buildPickupSnapshot,
+    applyOfflineOp,
   };
 }
