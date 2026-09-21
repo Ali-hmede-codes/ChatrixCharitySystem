@@ -76,6 +76,20 @@ export function isConnectionError(error) {
   );
 }
 
+// zapo drops a recipient device from the fanout when no Signal session exists
+// for it, surfacing as "direct fanout dropping primary recipient device
+// without signal session". The send then rejects, and without recovery the
+// message falls back to SMS even though the recipient is on WhatsApp. This
+// also catches the related prekey-bundle fetch failures that prevent a
+// session from bootstrapping. Matched narrowly so rate-limit / connection
+// errors keep their own handling paths.
+export function isSignalSessionError(error) {
+  const text = String(error?.message || error || "").toLowerCase();
+  return /signal session|fanout dropping|prekey|could not establish.*session|no.*signal.*session/i.test(
+    text
+  );
+}
+
 export function shouldAutoResume(reason) {
   return reason !== "user_stop" && reason !== "server_restart";
 }

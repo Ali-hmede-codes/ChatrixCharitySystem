@@ -14,6 +14,7 @@ import { looksRateLimited, respectServerLimits } from "./pacing.js";
 import {
   classifyWhatsAppClose,
   isConnectionError,
+  isSignalSessionError,
   pauseCopy,
   shouldAutoResume,
 } from "./interrupt.js";
@@ -302,7 +303,7 @@ export function createSendService(ctx) {
     return { buildMessages, sampleText };
   }
 
-  async function sendOne(jid, message) {
+  async function sendOne(jid, message, phone = "") {
     const client = ctx.services.whatsapp.getClient();
     if (!client || !ctx.services.whatsapp.isOpen()) {
       const err = new Error("WhatsApp is disconnected");
@@ -326,11 +327,57 @@ export function createSendService(ctx) {
     // disconnect mid-send), the message may already be on its way. Flag it so
     // the caller marks "waiting" instead of "retry" to avoid a duplicate.
     let result = null;
-    try {
-      result = await withTimeout(client.message.send(jid, message), 45_000, "WhatsApp send timed out");
-    } catch (error) {
-      error.sendAttempted = true;
-      throw error;
+    // zapo drops a recipient device from the fanout when no Signal session
+    // exists for it ("direct fanout dropping primary recipient device without
+    // signal session"). The send rejects and, without recovery, the message
+    // falls back to SMS even though the recipient is on WhatsApp. On that
+    // specific error, force-refresh the Signal session for the JID and retry
+    // the send a couple of times before giving up. Other errors (rate limit,
+    // disconnect) keep their existing handling paths.
+    const MAX_SESSION_RETRIES = 2;
+    for (let attempt = 0; ; attempt += 1) {
+      if (sendJob.cancelled) return null;
+      if (!ctx.services.whatsapp.isOpen()) {
+        const err = new Error("WhatsApp is disconnected");
+        err.beforeSend = true;
+        throw err;
+      }
+      try {
+        result = await withTimeout(client.message.send(jid, message), 45_000, "WhatsApp send timed out");
+        break;
+      } catch (error) {
+        const canRetrySession =
+          attempt < MAX_SESSION_RETRIES &&
+          isSignalSessionError(error) &&
+          ctx.services.whatsapp.isOpen() &&
+          typeof client.message.syncSignalSession === "function";
+        if (!canRetrySession) {
+          error.sendAttempted = true;
+          throw error;
+        }
+        ctx.logger.warn(
+          { err: error, jid, attempt: attempt + 1 },
+          "signal session missing — refreshing session and retrying send"
+        );
+        ctx.io.emit("send:progress", {
+          index: sendJob.index,
+          total: sendJob.total,
+          phone: phone ? `+${phone}` : "",
+          state: "sending",
+          detail: `Re-establishing encrypted session${attempt > 0 ? " (retry)" : ""}…`,
+          campaignId: sendJob.campaignId || null,
+        });
+        try {
+          await withTimeout(
+            client.message.syncSignalSession(jid),
+            20_000,
+            "Signal session sync timed out"
+          );
+        } catch (syncError) {
+          ctx.logger.warn({ err: syncError, jid }, "signal session sync failed");
+        }
+        await waitGap(1_500, isCancelled);
+      }
     }
     try {
       await client.presence.sendChatstate(jid, { state: "paused" });
@@ -488,7 +535,7 @@ export function createSendService(ctx) {
               detail: familyLabel,
               campaignId: campaign?.id || null,
             });
-            lastResult = await sendOne(target.jid, outgoing[m]);
+            lastResult = await sendOne(target.jid, outgoing[m], phone);
             if (sendJob.cancelled && !lastResult) {
               stoppedMid = true;
               break;
