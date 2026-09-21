@@ -38,6 +38,68 @@ function PickupListSkeleton({ rows = 6 }) {
   );
 }
 
+function formatPickupCount(n) {
+  return Number(n || 0).toLocaleString();
+}
+
+function PickupFilterCount({ n, children }) {
+  return (
+    <span className="pickup-filter-count">
+      {children != null ? children : formatPickupCount(n)}
+    </span>
+  );
+}
+
+function campaignPickupCounts(campaign) {
+  const recipients = campaign?.recipients;
+  if (Array.isArray(recipients) && recipients.length > 0) {
+    let taken = 0;
+    let total = 0;
+    for (const recipient of recipients) {
+      const pickups =
+        Array.isArray(recipient.pickups) && recipient.pickups.length > 0
+          ? recipient.pickups
+          : [{ takenAt: recipient.takenAt }];
+      total += pickups.length;
+      for (const pickup of pickups) {
+        if (pickup?.takenAt) taken += 1;
+      }
+    }
+    return { taken, total, pending: Math.max(0, total - taken) };
+  }
+  const taken = Number(campaign?.stats?.taken) || 0;
+  const total =
+    Number(campaign?.stats?.people) ||
+    Number(campaign?.totalPeople) ||
+    Number(campaign?.totalRecipients) ||
+    0;
+  return { taken, total, pending: Math.max(0, total - taken) };
+}
+
+function mergeCampaignForCounts(campaign, snapshotById) {
+  const snap = snapshotById?.get(campaign?.id);
+  if (snap && Array.isArray(snap.recipients) && snap.recipients.length > 0) {
+    return { ...campaign, recipients: snap.recipients };
+  }
+  return campaign;
+}
+
+function pickupScopeCounts(campaigns, snapshotById, { campaignDay = "all", campaignId = "" } = {}) {
+  const campId = String(campaignId || "").trim();
+  let taken = 0;
+  let total = 0;
+  for (const raw of campaigns || []) {
+    if (campId && raw.id !== campId) continue;
+    if (campaignDay && campaignDay !== "all" && campaignDayKey(raw.createdAt) !== campaignDay) {
+      continue;
+    }
+    const counts = campaignPickupCounts(mergeCampaignForCounts(raw, snapshotById));
+    taken += counts.taken;
+    total += counts.total;
+  }
+  return { taken, pending: Math.max(0, total - taken), total };
+}
+
 export function PickupScreen() {
   const {
     pickupResults,
@@ -53,6 +115,7 @@ export function PickupScreen() {
     socketConnected,
     inventory,
     offlineReady,
+    offlineSnapshot,
     pendingCount,
     syncing,
     lastSyncAt,
@@ -134,51 +197,67 @@ export function PickupScreen() {
     });
   }, [pickupResults.items, items, status, isDesktop]);
 
+  const snapshotById = useMemo(
+    () => new Map((offlineSnapshot?.campaigns || []).map((campaign) => [campaign.id, campaign])),
+    [offlineSnapshot]
+  );
+  const sourceCampaigns = useMemo(() => {
+    if (campaigns.length) return campaigns;
+    return offlineSnapshot?.campaigns || [];
+  }, [campaigns, offlineSnapshot]);
+
   const campaignDates = useMemo(() => {
     const map = new Map();
-    for (const campaign of campaigns) {
+    for (const campaign of sourceCampaigns) {
       const day = campaignDayKey(campaign.createdAt);
       if (!day) continue;
-      const cur = map.get(day) || { day, campaigns: 0, taken: 0, people: 0 };
+      const counts = campaignPickupCounts(mergeCampaignForCounts(campaign, snapshotById));
+      const cur = map.get(day) || { day, campaigns: 0, taken: 0, people: 0, pending: 0 };
       cur.campaigns += 1;
-      cur.taken += Number(campaign.stats?.taken) || 0;
-      cur.people += Number(campaign.stats?.people) || Number(campaign.totalRecipients) || 0;
+      cur.taken += counts.taken;
+      cur.people += counts.total;
+      cur.pending += counts.pending;
       map.set(day, cur);
     }
     return [...map.values()].sort((a, b) => b.day.localeCompare(a.day));
-  }, [campaigns]);
+  }, [sourceCampaigns, snapshotById]);
 
   const campaignsOnDay = useMemo(() => {
-    if (campaignDay === "all") return campaigns;
-    return campaigns.filter((campaign) => campaignDayKey(campaign.createdAt) === campaignDay);
-  }, [campaigns, campaignDay]);
+    if (campaignDay === "all") return sourceCampaigns;
+    return sourceCampaigns.filter((campaign) => campaignDayKey(campaign.createdAt) === campaignDay);
+  }, [sourceCampaigns, campaignDay]);
 
-  const totalTaken = useMemo(
-    () => campaigns.reduce((sum, campaign) => sum + (Number(campaign.stats?.taken) || 0), 0),
-    [campaigns]
+  const dayCounts = useMemo(
+    () => pickupScopeCounts(sourceCampaigns, snapshotById, { campaignDay }),
+    [sourceCampaigns, snapshotById, campaignDay]
   );
-  const filteredTaken = useMemo(
-    () => campaignsOnDay.reduce((sum, campaign) => sum + (Number(campaign.stats?.taken) || 0), 0),
-    [campaignsOnDay]
+  const scopeCounts = useMemo(
+    () =>
+      campaignId
+        ? pickupScopeCounts(sourceCampaigns, snapshotById, { campaignDay, campaignId })
+        : dayCounts,
+    [campaignId, campaignDay, sourceCampaigns, snapshotById, dayCounts]
   );
 
   const exportCampaignsOnDay = useMemo(() => {
-    if (exportDay === "all") return campaigns;
-    return campaigns.filter((campaign) => campaignDayKey(campaign.createdAt) === exportDay);
-  }, [campaigns, exportDay]);
+    if (exportDay === "all") return sourceCampaigns;
+    return sourceCampaigns.filter((campaign) => campaignDayKey(campaign.createdAt) === exportDay);
+  }, [sourceCampaigns, exportDay]);
 
-  const exportScope = useMemo(() => {
-    const pool = exportCampaignId
-      ? exportCampaignsOnDay.filter((c) => c.id === exportCampaignId)
-      : exportCampaignsOnDay;
-    const taken = pool.reduce((s, c) => s + (Number(c.stats?.taken) || 0), 0);
-    const people = pool.reduce(
-      (s, c) => s + (Number(c.stats?.people) || Number(c.totalRecipients) || 0),
-      0
-    );
-    const pending = Math.max(0, people - taken);
-    return { taken, pending, total: taken + pending, hasCampaigns: pool.length > 0 };
-  }, [exportCampaignsOnDay, exportCampaignId]);
+  const exportDayCounts = useMemo(
+    () => pickupScopeCounts(sourceCampaigns, snapshotById, { campaignDay: exportDay }),
+    [sourceCampaigns, snapshotById, exportDay]
+  );
+  const exportScope = useMemo(
+    () =>
+      exportCampaignId
+        ? pickupScopeCounts(sourceCampaigns, snapshotById, {
+            campaignDay: exportDay,
+            campaignId: exportCampaignId,
+          })
+        : exportDayCounts,
+    [sourceCampaigns, snapshotById, exportDay, exportCampaignId, exportDayCounts]
+  );
 
   useEffect(() => {
     if (!campaignId) return;
@@ -279,8 +358,14 @@ export function PickupScreen() {
         </div>
         <div className="header-actions pickup-header-stats">
           <span className="chip-badge chip-success">
-            {campaignDay === "all" ? totalTaken : filteredTaken} collected
+            {formatPickupCount(scopeCounts.taken)} collected
             {campaignDay !== "all" ? ` · ${formatCampaignDay(campaignDay)}` : ""}
+          </span>
+          <span className="chip-badge chip-warning">
+            {formatPickupCount(scopeCounts.pending)} not collected
+          </span>
+          <span className="chip-badge chip-neutral">
+            {formatPickupCount(scopeCounts.total)} total
           </span>
           <span className="chip-badge chip-warning">{printerSettings.paperWidthMm} mm paper</span>
           {!socketConnected && (
@@ -344,27 +429,39 @@ export function PickupScreen() {
               </div>
 
               <div className="pickup-filter-row">
-                <div className="pickup-filter-group">
+                <div className="pickup-filter-group" role="tablist" aria-label="Collection status">
                   <button
                     type="button"
-                    className={`pickup-filter-btn ${status === "pending" ? "active" : ""}`}
+                    role="tab"
+                    aria-selected={status === "pending"}
+                    aria-label={`Not collected, ${formatPickupCount(scopeCounts.pending)}`}
+                    className={`pickup-filter-btn is-waiting ${status === "pending" ? "active" : ""}`}
                     onClick={() => setStatus("pending")}
                   >
                     Not collected
+                    <PickupFilterCount n={scopeCounts.pending} />
                   </button>
                   <button
                     type="button"
+                    role="tab"
+                    aria-selected={status === "taken"}
+                    aria-label={`Collected, ${formatPickupCount(scopeCounts.taken)}`}
                     className={`pickup-filter-btn ${status === "taken" ? "active" : ""}`}
                     onClick={() => setStatus("taken")}
                   >
                     Collected
+                    <PickupFilterCount n={scopeCounts.taken} />
                   </button>
                   <button
                     type="button"
+                    role="tab"
+                    aria-selected={status === "all"}
+                    aria-label={`All people, ${formatPickupCount(scopeCounts.total)}`}
                     className={`pickup-filter-btn ${status === "all" ? "active" : ""}`}
                     onClick={() => setStatus("all")}
                   >
                     All people
+                    <PickupFilterCount n={scopeCounts.total} />
                   </button>
                 </div>
               </div>
@@ -394,7 +491,7 @@ export function PickupScreen() {
                       onClick={() => setCampaignDay(item.day)}
                     >
                       {formatCampaignDay(item.day)}
-                      {item.taken ? ` · ${item.taken}` : ""}
+                      {item.taken ? ` · ${formatPickupCount(item.taken)}` : ""}
                     </button>
                   ))}
                 </div>
@@ -421,13 +518,23 @@ export function PickupScreen() {
                     onChange={(e) => setCampaignId(e.target.value)}
                   >
                     <option value="">
-                      All campaigns{campaignDay !== "all" ? ` · ${formatCampaignDay(campaignDay)}` : ""}
+                      All campaigns
+                      {campaignDay !== "all" ? ` · ${formatCampaignDay(campaignDay)}` : ""}
+                      {dayCounts.total
+                        ? ` · ${formatPickupCount(dayCounts.taken)} collected · ${formatPickupCount(dayCounts.pending)} not collected`
+                        : ""}
                     </option>
-                    {campaignsOnDay.map((campaign) => (
-                      <option key={campaign.id} value={campaign.id}>
-                        {campaign.name} · {campaign.stats?.taken || 0} collected
-                      </option>
-                    ))}
+                    {campaignsOnDay.map((campaign) => {
+                      const counts = campaignPickupCounts(
+                        mergeCampaignForCounts(campaign, snapshotById)
+                      );
+                      return (
+                        <option key={campaign.id} value={campaign.id}>
+                          {campaign.name} · {formatPickupCount(counts.taken)} collected ·{" "}
+                          {formatPickupCount(counts.pending)} not collected
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               )}
@@ -649,7 +756,10 @@ export function PickupScreen() {
                 onChange={() => setExportStatus("taken")}
               />
               <span className="export-radio-copy">
-                <strong>Only collected</strong>
+                <strong>
+                  Only collected
+                  <PickupFilterCount n={exportScope.taken} />
+                </strong>
                 <small>People who already collected aid.</small>
               </span>
             </label>
@@ -662,7 +772,10 @@ export function PickupScreen() {
                 onChange={() => setExportStatus("pending")}
               />
               <span className="export-radio-copy">
-                <strong>Only not collected</strong>
+                <strong>
+                  Only not collected
+                  <PickupFilterCount n={exportScope.pending} />
+                </strong>
                 <small>People who have not collected yet.</small>
               </span>
             </label>
@@ -675,7 +788,10 @@ export function PickupScreen() {
                 onChange={() => setExportStatus("all")}
               />
               <span className="export-radio-copy">
-                <strong>Collected and not collected</strong>
+                <strong>
+                  Collected and not collected
+                  <PickupFilterCount n={exportScope.total} />
+                </strong>
                 <small>Both in one sheet — not collected rows are highlighted red.</small>
               </span>
             </label>
@@ -707,7 +823,7 @@ export function PickupScreen() {
                 onClick={() => setExportDay(item.day)}
               >
                 {formatCampaignDay(item.day)}
-                {item.taken ? ` · ${item.taken}` : ""}
+                {item.taken ? ` · ${formatPickupCount(item.taken)}` : ""}
               </button>
             ))}
           </div>
@@ -734,21 +850,31 @@ export function PickupScreen() {
               onChange={(e) => setExportCampaignId(e.target.value)}
             >
               <option value="">
-                All campaigns{exportDay !== "all" ? ` · ${formatCampaignDay(exportDay)}` : ""}
+                All campaigns
+                {exportDay !== "all" ? ` · ${formatCampaignDay(exportDay)}` : ""}
+                {exportDayCounts.total
+                  ? ` · ${formatPickupCount(exportDayCounts.taken)} collected · ${formatPickupCount(exportDayCounts.pending)} not collected`
+                  : ""}
               </option>
-              {exportCampaignsOnDay.map((campaign) => (
-                <option key={campaign.id} value={campaign.id}>
-                  {campaign.name} · {campaign.stats?.taken || 0} collected
-                </option>
-              ))}
+              {exportCampaignsOnDay.map((campaign) => {
+                const counts = campaignPickupCounts(
+                  mergeCampaignForCounts(campaign, snapshotById)
+                );
+                return (
+                  <option key={campaign.id} value={campaign.id}>
+                    {campaign.name} · {formatPickupCount(counts.taken)} collected ·{" "}
+                    {formatPickupCount(counts.pending)} not collected
+                  </option>
+                );
+              })}
             </select>
           </div>
         )}
 
         <div className="export-sheet-summary">
-          <span className="chip-badge chip-success">{exportScope.taken} collected</span>
-          <span className="chip-badge chip-warning">{exportScope.pending} not collected</span>
-          <span className="chip-badge">{exportScope.total} total</span>
+          <span className="chip-badge chip-success">{formatPickupCount(exportScope.taken)} collected</span>
+          <span className="chip-badge chip-warning">{formatPickupCount(exportScope.pending)} not collected</span>
+          <span className="chip-badge">{formatPickupCount(exportScope.total)} total</span>
         </div>
 
         <div className="export-sheet-actions">
