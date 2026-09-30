@@ -9,7 +9,7 @@ import { createContext } from "./context.js";
 export async function createApp({ config, logger }) {
   const app = express();
   const httpServer = createServer(app);
-  const io = new Server(httpServer, { cors: { origin: false }, maxHttpBufferSize: 2e6 });
+  const io = new Server(httpServer, { cors: { origin: false }, maxHttpBufferSize: 8e6 });
   const ctx = createContext({ config, logger, app, httpServer, io });
 
   const distHtml = path.join(config.FRONTEND_DIR, "dist", "index.html");

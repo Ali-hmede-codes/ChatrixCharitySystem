@@ -92,6 +92,7 @@ export function AppProvider({ children }) {
   // collecting at 0, and warns when under 20.
   const [inventory, setInventory] = useState({ count: 0, label: "Aid portions", updatedAt: null });
   const inventoryRef = useRef(inventory);
+  const [lastPickupImport, setLastPickupImport] = useState(null);
   const [pickupResults, setPickupResults] = useState({
     query: "",
     scope: "today",
@@ -614,6 +615,19 @@ export function AppProvider({ children }) {
       );
     });
 
+    socket.on("pickup:import:done", (result) => {
+      if (result?.campaign?.id) {
+        setLastPickupImport({ ...result, at: Date.now() });
+      }
+      const people = Number(result?.people) || 0;
+      const name = result?.campaign?.name || "Pickup list";
+      showToast(`${name} is on the desk · ${people} people. No WhatsApp messages were sent.`, "success");
+    });
+
+    socket.on("pickup:import:error", (msg) => {
+      if (msg) showToast(msg, "error");
+    });
+
     socket.on("pickup:results", (data) => {
       setPickupResults({
         query: data?.query || "",
@@ -1019,6 +1033,14 @@ export function AppProvider({ children }) {
     }
   }
 
+  function importPickupList(payload = {}) {
+    if (!socketRef.current?.connected) {
+      showToast("Connect to Chatrix before importing a pickup list.", "warning");
+      return;
+    }
+    socketRef.current.emit("pickup:import", payload || {});
+  }
+
   function searchPickup(payload = {}) {
     if (!socketRef.current?.connected) {
       const snap = offlineSnapshotRef.current;
@@ -1261,6 +1283,8 @@ export function AppProvider({ children }) {
     pickupLoading,
     pickupResults,
     searchPickup,
+    importPickupList,
+    lastPickupImport,
     exportCollected,
     markPickup,
     reprintPickup,

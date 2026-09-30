@@ -359,7 +359,7 @@ export function createCampaignService(ctx) {
       totalRecipients: c.totalRecipients,
       totalPeople: Number(c.stats?.people) || c.totalRecipients,
       remainingCount: remaining,
-      resumable: c.status !== "completed" && remaining > 0,
+      resumable: c.status !== "completed" && c.status !== "pickup" && remaining > 0,
       mergedFrom: Number(c.mergedFrom) || 0,
       stats: { ...c.stats },
     };
@@ -440,6 +440,7 @@ export function createCampaignService(ctx) {
     aidCode = "",
     sendOptions = {},
     senderPhone = "",
+    pickupOnly = false,
   }) {
     const rawName = String(name || "").trim();
     const defaultTitle = `Campaign ${new Date().toLocaleDateString("en-GB", {
@@ -453,9 +454,9 @@ export function createCampaignService(ctx) {
       id: `camp-${Date.now()}`,
       name: rawName || defaultTitle,
       createdAt: Date.now(),
-      completedAt: null,
+      completedAt: pickupOnly ? Date.now() : null,
       pausedAt: null,
-      status: "running",
+      status: pickupOnly ? "pickup" : "running",
       pauseReason: null,
       enableSms: Boolean(enableSms) && Boolean(ctx.services.sms?.ready?.()),
       message: String(message || "").trim(),
@@ -502,9 +503,11 @@ export function createCampaignService(ctx) {
               code,
               // Per-person codes so shared numbers each get their own code.
               nameCodes: nameCodes ? { ...nameCodes } : null,
-              state: "queued",
+              state: pickupOnly ? "imported" : "queued",
               channel: "none",
-              detail: "Queued for sending",
+              detail: pickupOnly
+                ? "Imported for pickup. Messages were not sent by Chatrix."
+                : "Queued for sending",
               updatedAt: Date.now(),
               takenAt: null,
               takenAidId: "",
@@ -537,6 +540,40 @@ export function createCampaignService(ctx) {
     ctx.io.emit("campaigns:data", { campaigns: list() });
     ctx.io.emit("campaigns:update", publicSummary(newCampaign));
     return newCampaign;
+  }
+
+  // A desk list for people who were already messaged outside Chatrix.
+  // Nothing is queued to WhatsApp or SMS — the rows only show up for collection.
+  async function importPickupList({ name, recipients = [] } = {}) {
+    const title = String(name || "").replace(/\s+/g, " ").trim().slice(0, 160);
+    if (!title) return { ok: false, error: "Enter a name for this pickup list." };
+    const rows = Array.isArray(recipients) ? recipients : [];
+    const usable = rows.filter((row) => plusPhone(row?.phone));
+    if (!usable.length) {
+      return { ok: false, error: "No valid Lebanon (+961) or Syria (+963) phone numbers to import." };
+    }
+    if (usable.length > MERGE_RECIPIENT_LIMIT) {
+      return {
+        ok: false,
+        error: `This list has more than ${MERGE_RECIPIENT_LIMIT} people. Split the spreadsheet and import it in parts.`,
+      };
+    }
+
+    const campaign = await create({
+      name: title,
+      message: "",
+      recipients: usable,
+      enableSms: false,
+      pickupOnly: true,
+      sendOptions: { message: "", useNameTemplate: false, nameTemplate: "", enableSms: false },
+    });
+    ctx.io.emit("pickup:snapshot", buildPickupSnapshot());
+    return {
+      ok: true,
+      campaign: publicSummary(campaign),
+      people: Number(campaign.stats?.people) || campaign.recipients.length,
+      numbers: campaign.recipients.length,
+    };
   }
 
   function updateRecipient(campaignId, { phone, state, channel, detail, sentNames, messageIds, sentAt, jid }) {
@@ -1450,6 +1487,7 @@ export function createCampaignService(ctx) {
     waitingRecipients,
     get,
     create,
+    importPickupList,
     update: updateCampaign,
     updateRecipient,
     removeRecipients,

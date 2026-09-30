@@ -6,6 +6,7 @@ const FINISHED_STATES = new Set([
   "sms-queued",
   "skipped",
   "undelivered",
+  "imported",
 ]);
 
 export const PAUSE_COPY = {

@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
-import { formatPhone, normalizePhone, toWhatsAppDigits } from "./phone.js";
+import { formatPhone, normalizePhone, phoneKey, toWhatsAppDigits } from "./phone.js";
+import { addPersonName, sanitizeAidCode } from "./names.js";
 import { signatureImageParts } from "./signature.js";
 
 export function cellText(value) {
@@ -145,6 +146,61 @@ export function getColumnStats(rows, index) {
     }
   }
   return { hits, invalid, lebanon, syria, samples, invalidSamples };
+}
+
+// Turn spreadsheet rows into the same person records the send importer uses,
+// without a send-size cap. Shared phone numbers are combined so each person
+// on that number keeps their own pickup code.
+export function peopleFromSheetRows(rows, { phoneIdx, nameIdx = -1, codeIdx = -1, limit = 5000 } = {}) {
+  const byPhone = new Map();
+  const people = [];
+  let skippedInvalid = 0;
+  let mergedDupes = 0;
+  let overflow = false;
+  const phoneCol = Number(phoneIdx);
+  const nameCol = Number(nameIdx);
+  const codeCol = Number(codeIdx);
+
+  for (const row of rows || []) {
+    const rawPhone = row[phoneCol];
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+      if (String(rawPhone ?? "").trim()) skippedInvalid += 1;
+      continue;
+    }
+
+    const key = phoneKey(phone);
+    const rawName = nameCol >= 0 && nameCol !== phoneCol ? String(row[nameCol] || "").trim() : "";
+    const rawCode =
+      codeCol >= 0 && codeCol !== phoneCol && codeCol !== nameCol ? sanitizeAidCode(row[codeCol]) : "";
+
+    if (byPhone.has(key)) {
+      const existing = byPhone.get(key);
+      addPersonName(existing, rawName, rawCode);
+      if (rawCode && !existing.code) existing.code = rawCode;
+      mergedDupes += 1;
+      continue;
+    }
+
+    if (people.length >= limit) {
+      overflow = true;
+      continue;
+    }
+
+    const person = {
+      phone,
+      names: [],
+      name: "",
+      label: "",
+      code: rawCode,
+      nameCodes: {},
+    };
+    addPersonName(person, rawName, rawCode);
+    byPhone.set(key, person);
+    people.push(person);
+  }
+
+  return { people, skippedInvalid, mergedDupes, overflow };
 }
 
 export async function parseSpreadsheet(file) {

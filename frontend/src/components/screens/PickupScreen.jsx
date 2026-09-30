@@ -17,8 +17,10 @@ import {
   IconX,
   IconUsers,
   IconSpreadsheet,
+  IconUpload,
   IconAlertCircle,
 } from "../common/Icons.jsx";
+import { PickupImportModal } from "./PickupImportModal.jsx";
 import { Skeleton } from "../common/Skeleton.jsx";
 import { SignaturePad } from "../common/SignaturePad.jsx";
 import { pickupIsSigned } from "../../services/signature.js";
@@ -107,6 +109,9 @@ export function PickupScreen() {
     pickupResults,
     searchPickup,
     exportCollected,
+    importPickupList,
+    lastPickupImport,
+    showToast,
     markPickup,
     reprintPickup,
     undoPickup,
@@ -140,6 +145,7 @@ export function PickupScreen() {
   const [exportCampaignId, setExportCampaignId] = useState("");
   const [signOpen, setSignOpen] = useState(false);
   const [signMode, setSignMode] = useState("mark");
+  const [importOpen, setImportOpen] = useState(false);
 
   // On mobile the confirm card is a bottom sheet that should only open when
   // the user taps a name — so we skip the "auto-select first row" behaviour on
@@ -148,6 +154,16 @@ export function PickupScreen() {
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(min-width: 1025px)").matches
   );
+  useEffect(() => {
+    const id = lastPickupImport?.campaign?.id;
+    if (!id) return;
+    setCampaignDay("all");
+    setCampaignId(id);
+    setStatus("pending");
+    setQuery("");
+    setImportOpen(false);
+  }, [lastPickupImport]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mq = window.matchMedia("(min-width: 1025px)");
@@ -354,7 +370,7 @@ export function PickupScreen() {
       return "Offline with no cached pickup list yet. Open this desk once while online to load the list, then it keeps working offline and uploads your collections when Wi-Fi returns.";
     }
     if (campaigns.length === 0) {
-      return "No campaigns yet. Send an outreach campaign first, then people can collect aid here.";
+      return "No lists yet. Import an Excel file of people who were already messaged, or send a campaign from Chatrix first.";
     }
     if (query) return `No people match “${query}”.`;
     if (status === "taken") {
@@ -413,6 +429,16 @@ export function PickupScreen() {
                       : "Offline · ready"}
             </span>
           )}
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setImportOpen(true)}
+            disabled={!socketConnected}
+            title={socketConnected ? "Add people who were already messaged outside Chatrix" : "Connect to Chatrix to import a list"}
+          >
+            <IconUpload className="w-4 h-4 mr-1.5" />
+            <span>Import list</span>
+          </button>
           <button
             type="button"
             className="btn-primary"
@@ -933,6 +959,14 @@ export function PickupScreen() {
           </button>
         </div>
       </aside>
+
+      {importOpen && (
+        <PickupImportModal
+          onClose={() => setImportOpen(false)}
+          onImport={importPickupList}
+          showToast={showToast}
+        />
+      )}
 
       <SignaturePad
         open={signOpen}

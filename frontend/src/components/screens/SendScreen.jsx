@@ -985,14 +985,18 @@ export function SendScreen() {
                             <span className="chip-badge chip-danger">
                               Stopped{c.resumable ? ` · ${c.remainingCount} left` : ""}
                             </span>
+                          ) : c.status === "pickup" ? (
+                            <span className="chip-badge chip-teal">Pickup only</span>
                           ) : (
                             <span className="chip-badge chip-success">Completed</span>
                           )}
 
-                          {c.enableSms ? (
-                            <span className="chip-badge chip-teal">SMS Fallback ON</span>
-                          ) : (
-                            <span className="chip-badge chip-neutral">WhatsApp Only</span>
+                          {c.status !== "pickup" && (
+                            c.enableSms ? (
+                              <span className="chip-badge chip-teal">SMS Fallback ON</span>
+                            ) : (
+                              <span className="chip-badge chip-neutral">WhatsApp Only</span>
+                            )
                           )}
                           {c.aidCode && (
                             <span className="chip-badge chip-warning">

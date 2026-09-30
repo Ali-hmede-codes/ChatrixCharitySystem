@@ -71,6 +71,17 @@ export const campaignsFeature = {
         socket.emit("pickup:results", campaigns.searchPickup(payload || {}));
       });
 
+      socket.on("pickup:import", async (payload) => {
+        try {
+          const result = await campaigns.importPickupList(payload || {});
+          if (!result.ok) socket.emit("pickup:import:error", result.error);
+          else socket.emit("pickup:import:done", result);
+        } catch (err) {
+          ctx.logger?.error?.({ err }, "pickup import failed");
+          socket.emit("pickup:import:error", "Could not import that spreadsheet.");
+        }
+      });
+
       socket.on("pickup:export", (payload) => {
         const p = payload || {};
         const wantStatus =

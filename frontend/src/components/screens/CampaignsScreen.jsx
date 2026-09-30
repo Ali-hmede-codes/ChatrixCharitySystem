@@ -68,6 +68,7 @@ function statusLabel(campaign) {
   if (campaign.status === "running") return "Running";
   if (campaign.status === "interrupted") return `Paused · ${campaign.remainingCount || 0} left`;
   if (campaign.status === "stopped") return campaign.resumable ? `Stopped · ${campaign.remainingCount} left` : "Stopped";
+  if (campaign.status === "pickup") return "Pickup only";
   return "Completed";
 }
 
@@ -75,6 +76,7 @@ function statusChip(campaign) {
   if (campaign.status === "running") return "chip-amber";
   if (campaign.status === "interrupted") return "chip-amber";
   if (campaign.status === "stopped") return "chip-danger";
+  if (campaign.status === "pickup") return "chip-teal";
   return "chip-success";
 }
 
@@ -449,10 +451,12 @@ export function CampaignsScreen() {
                       {c.mergedFrom > 1 && (
                         <span className="chip-badge chip-emerald">Merged · {c.mergedFrom} batches</span>
                       )}
-                      {c.enableSms ? (
-                        <span className="chip-badge chip-teal">SMS on</span>
-                      ) : (
-                        <span className="chip-badge chip-neutral">WhatsApp only</span>
+                      {c.status !== "pickup" && (
+                        c.enableSms ? (
+                          <span className="chip-badge chip-teal">SMS on</span>
+                        ) : (
+                          <span className="chip-badge chip-neutral">WhatsApp only</span>
+                        )
                       )}
                     </div>
                   </div>

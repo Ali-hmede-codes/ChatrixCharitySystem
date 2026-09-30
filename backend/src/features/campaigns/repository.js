@@ -3,6 +3,17 @@ import { sanitizeSignature } from "../../shared/signature.js";
 
 const MAX_SAVED_CAMPAIGNS = 60;
 
+function sanitizeNameCodes(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const out = {};
+  for (const [name, code] of Object.entries(input)) {
+    const key = String(name || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const value = String(code || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    if (key && value) out[key] = value;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 export function createCampaignRepository(ctx) {
   const { CAMPAIGNS_PATH, AID_SEQ_PATH } = ctx.config;
   const store = createJsonStore(CAMPAIGNS_PATH, []);
@@ -29,6 +40,7 @@ export function createCampaignRepository(ctx) {
       name: String(r.name || names.join(" + ") || ""),
       names,
       code: String(r.code || "").trim(),
+      nameCodes: sanitizeNameCodes(r.nameCodes),
       state: String(r.state || "queued"),
       channel: String(r.channel || "none"),
       detail: String(r.detail || ""),
