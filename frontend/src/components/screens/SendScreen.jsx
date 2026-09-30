@@ -13,6 +13,7 @@ import {
 import { getAvatarColor } from "../../constants/colors.js";
 import { matchesCampaign, matchesRecipient } from "../../services/search.js";
 import { DEFAULT_NAME_TEMPLATE } from "../../constants/config.js";
+import { canCancelOrDeleteCampaign } from "../../constants/connection.js";
 import {
   MESSAGE_TEMPLATES,
   AID_CODE_PLACEHOLDER,
@@ -50,6 +51,7 @@ export function SendScreen() {
     listColumns,
     smsSettings,
     waState,
+    waMessage,
     showToast,
     campaigns,
     isOnline,
@@ -960,6 +962,7 @@ export function SendScreen() {
                   const undelivered = c.stats?.undelivered || 0;
                   const taken = c.stats?.taken || 0;
                   const people = c.stats?.people || c.totalPeople || total;
+                  const control = canCancelOrDeleteCampaign({ sendJob, campaign: c, waState, waMessage });
 
                   return (
                     <div key={c.id} className="campaign-record-card">
@@ -1078,15 +1081,32 @@ export function SendScreen() {
                           <span>Reuse Message</span>
                         </button>
 
+                        {control.cancel && (
+                          <button
+                            type="button"
+                            className="btn-secondary btn-sm"
+                            title="Cancel this paused campaign and keep the remaining people"
+                            onClick={() => {
+                              if (!window.confirm(`Cancel "${c.name}"?\n\nSending stops. People already messaged stay saved. You can resume the rest later, or delete the campaign.`)) {
+                                return;
+                              }
+                              stopSend();
+                            }}
+                          >
+                            <IconStop className="w-3.5 h-3.5 mr-1" />
+                            <span>Cancel</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="btn-ghost-danger btn-sm"
+                          disabled={!control.delete}
                           onClick={() => {
                             if (window.confirm(`Delete campaign "${c.name}" from history?`)) {
                               deleteCampaign(c.id);
                             }
                           }}
-                          title="Delete from history"
+                          title={control.delete ? "Delete from history" : "Stop the live send first"}
                         >
                           <IconTrash className="w-3.5 h-3.5" />
                         </button>

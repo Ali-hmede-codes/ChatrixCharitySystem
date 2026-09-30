@@ -1,7 +1,7 @@
 import React from "react";
 import { useApp } from "../../context/AppContext.jsx";
-import { pauseCopy, needsNewWhatsAppLink } from "../../constants/connection.js";
-import { IconWifiOff, IconRefresh, IconSend, IconWhatsApp, IconAlertCircle } from "../common/Icons.jsx";
+import { pauseCopy, needsNewWhatsAppLink, canCancelOrDeleteCampaign } from "../../constants/connection.js";
+import { IconWifiOff, IconRefresh, IconSend, IconStop, IconTrash, IconWhatsApp, IconAlertCircle } from "../common/Icons.jsx";
 
 export function ConnectionBanner() {
   const {
@@ -12,6 +12,8 @@ export function ConnectionBanner() {
     sendJob,
     resumableCampaigns,
     resumeCampaign,
+    stopSend,
+    deleteCampaign,
     setCurrentStep,
     offlineReady,
     pendingCount,
@@ -67,6 +69,13 @@ export function ConnectionBanner() {
 
   if (sendJob.running && sendJob.paused) {
     const relink = needsNewWhatsAppLink(sendJob.pauseReason);
+    const control = canCancelOrDeleteCampaign({
+      sendJob,
+      campaign: { id: sendJob.campaignId, status: "interrupted", pauseReason: sendJob.pauseReason },
+      waState,
+      waMessage,
+    });
+    const campaignName = sendJob.campaignName || top?.name || "this campaign";
     return (
       <div className={`connection-banner ${relink ? "is-danger" : "is-warning"}`} role="status">
         <IconWhatsApp className="w-4 h-4" />
@@ -77,6 +86,36 @@ export function ConnectionBanner() {
           </strong>
           <span>{sendJob.stepText || copy.detail}</span>
         </div>
+        {control.cancel && (
+          <button
+            type="button"
+            className="btn-secondary btn-xs"
+            onClick={() => {
+              if (!window.confirm(`Cancel "${campaignName}"?\n\nSending stops. People already messaged stay saved. You can resume the rest later.`)) {
+                return;
+              }
+              stopSend();
+            }}
+          >
+            <IconStop className="w-3.5 h-3.5 mr-1" />
+            Cancel
+          </button>
+        )}
+        {control.delete && sendJob.campaignId && (
+          <button
+            type="button"
+            className="btn-danger btn-xs"
+            onClick={() => {
+              if (!window.confirm(`Delete "${campaignName}"?\n\nThis removes the campaign and its people. This cannot be undone.`)) {
+                return;
+              }
+              deleteCampaign(sendJob.campaignId);
+            }}
+          >
+            <IconTrash className="w-3.5 h-3.5 mr-1" />
+            Delete
+          </button>
+        )}
         {relink && (
           <button type="button" className="btn-secondary btn-xs" onClick={() => setCurrentStep("auth")}>
             Link number
@@ -113,6 +152,19 @@ export function ConnectionBanner() {
           </strong>
           <span>{pauseCopy(top.pauseReason).detail}</span>
         </div>
+        <button
+          type="button"
+          className="btn-danger btn-xs"
+          onClick={() => {
+            if (!window.confirm(`Delete "${top.name}"?\n\nThis removes the stopped campaign and its people. This cannot be undone.`)) {
+              return;
+            }
+            deleteCampaign(top.id);
+          }}
+        >
+          <IconTrash className="w-3.5 h-3.5 mr-1" />
+          Delete
+        </button>
         <button type="button" className="btn-primary btn-xs" onClick={() => setCurrentStep("auth")}>
           Link & continue
         </button>

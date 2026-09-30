@@ -378,6 +378,7 @@ export function AppProvider({ children }) {
         paused: Boolean(event.paused),
         pauseReason: event.pauseReason || null,
         campaignId: event.campaignId || prev.campaignId,
+        campaignName: event.campaignName || prev.campaignName || "",
         remaining: event.remaining || 0,
         autoResume: Boolean(event.autoResume),
         stepText: event.stepText || prev.stepText,
@@ -396,16 +397,19 @@ export function AppProvider({ children }) {
         running: false,
         paused: false,
         locked: !event.resumable,
-        remaining: event.remaining || 0,
-        campaignId: event.campaignId || prev.campaignId,
+        remaining: event.dropped ? 0 : event.remaining || 0,
+        campaignId: event.dropped ? null : event.campaignId || prev.campaignId,
         progressPercent: event.resumable
           ? Math.round(((event.total - (event.remaining || 0)) / Math.max(1, event.total)) * 100)
           : 100,
-        stepText: event.resumable
+        stepText: event.dropped
+          ? ""
+          : event.resumable
           ? `Paused with ${event.remaining} remaining. Resume when WhatsApp is linked.`
           : `${event.stopped ? "Stopped. " : "Finished. "}${event.sent} sent · ${event.failed} failed · ${event.skipped || 0} skipped. Waiting ${smsSettingsRef.current?.deliveryWaitMinutes || 10} minutes for WhatsApp delivery.`,
         deliverySummary: event.delivery || prev.deliverySummary,
       }));
+      if (event.dropped) return;
       if (event.resumable && event.stopped) {
         showToast(`Stopped · ${event.remaining} remaining. Resume anytime to continue.`, "info");
       } else if (event.resumable) {

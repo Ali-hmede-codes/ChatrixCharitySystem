@@ -11,23 +11,27 @@ const FINISHED_STATES = new Set([
 export const PAUSE_COPY = {
   whatsapp_disconnect: {
     title: "WhatsApp dropped",
-    detail: "The WhatsApp link dropped (Wi-Fi or network). Chatrix will continue this campaign automatically when the number reconnects.",
+    detail: "The WhatsApp link dropped (Wi-Fi, network, or QR offline). Cancel or delete this campaign, or wait — Chatrix continues it when the number reconnects.",
   },
   banned: {
     title: "This WhatsApp number was blocked",
-    detail: "Sending paused. Link a new charity number with the QR code — unfinished recipients will continue from where this campaign stopped.",
+    detail: "Sending paused. You can cancel or delete this campaign, or link a new charity number with the QR code — unfinished recipients will continue from where this campaign stopped.",
+  },
+  restricted: {
+    title: "This WhatsApp account is restricted",
+    detail: "Sending paused. Cancel this campaign to keep the remaining people, or delete it. Resume later once the account can send again.",
   },
   removed: {
     title: "This device was removed from WhatsApp",
-    detail: "Sending paused. Scan a new QR code. The campaign will continue with everyone who has not received the message yet.",
+    detail: "Sending paused because the QR session is offline. Cancel or delete this campaign, or scan a new QR code. Already-sent messages are kept.",
   },
   logged_out: {
     title: "WhatsApp signed out",
-    detail: "Sending paused. Link WhatsApp again to continue the remaining recipients. Already-sent messages will not be sent twice.",
+    detail: "Sending paused because the QR session is offline. Cancel or delete this campaign, or link WhatsApp again. Already-sent messages will not be sent twice.",
   },
   session_replaced: {
     title: "WhatsApp linked on another computer",
-    detail: "This session was replaced. Scan the QR again on this computer to continue the unfinished campaign.",
+    detail: "The QR session is offline. Cancel or delete this campaign, or scan the QR again on this computer to continue.",
   },
   user_stop: {
     title: "Sending stopped",
@@ -49,7 +53,8 @@ export function isRecipientPending(recipient) {
 
 export function classifyWhatsAppClose({ reason, code, fatal } = {}) {
   const why = String(reason || "");
-  if (code === 402 || code === 406 || why === "failure_banned" || why === "failure_locked") {
+  if (why === "failure_locked") return "restricted";
+  if (code === 402 || code === 406 || why === "failure_banned") {
     return "banned";
   }
   if (why === "stream_error_device_removed") return "removed";
@@ -91,7 +96,7 @@ export function isSignalSessionError(error) {
 }
 
 export function shouldAutoResume(reason) {
-  return reason !== "user_stop" && reason !== "server_restart";
+  return reason !== "user_stop" && reason !== "server_restart" && reason !== "restricted";
 }
 
 export function pauseCopy(reason) {

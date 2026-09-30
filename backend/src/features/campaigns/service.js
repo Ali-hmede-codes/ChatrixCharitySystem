@@ -764,8 +764,9 @@ export function createCampaignService(ctx) {
   async function deleteCampaign(campaignId) {
     const id = String(campaignId || "");
     if (!id) return { ok: false, error: "Campaign not found." };
-    if (runningCampaignId() === id) {
-      return { ok: false, error: "Stop the live send first, then delete this campaign." };
+    const release = ctx.services.send?.releasePausedCampaign?.(id);
+    if (release && release.ok === false) {
+      return { ok: false, error: release.error || "Stop the live send first, then delete this campaign." };
     }
     const before = campaigns.length;
     campaigns = campaigns.filter((c) => c.id !== id);
@@ -779,7 +780,10 @@ export function createCampaignService(ctx) {
     if (!wanted.size) return { ok: false, error: "Choose at least one campaign to delete." };
     const live = runningCampaignId();
     if (live && wanted.has(live)) {
-      return { ok: false, error: "Stop the live send first. The running campaign was not deleted." };
+      const release = ctx.services.send?.releasePausedCampaign?.(live);
+      if (release && release.ok === false) {
+        return { ok: false, error: "Stop the live send first. The running campaign was not deleted." };
+      }
     }
     const removedIds = campaigns.filter((c) => wanted.has(c.id)).map((c) => c.id);
     if (!removedIds.length) return { ok: false, error: "No matching campaigns to delete." };

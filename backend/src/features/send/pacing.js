@@ -3,6 +3,16 @@ export function looksRateLimited(error) {
   return /rate|429|too many|throttl|spam|restricted|not-authorized|forbidden|locked/.test(text);
 }
 
+export function looksAccountBanned(error) {
+  const text = String(error?.message || error || "").toLowerCase();
+  return /banned|\bblocked\b/.test(text);
+}
+
+export function looksAccountRestricted(error) {
+  const text = String(error?.message || error || "").toLowerCase();
+  return /restrict|not-authorized|forbidden|locked/.test(text);
+}
+
 export async function respectServerLimits(client) {
   try {
     const cap = await client.message.getNewChatMessageCapping();
@@ -27,14 +37,9 @@ export async function respectServerLimits(client) {
   try {
     const lock = await client.message.getReachoutTimelock();
     if (lock?.isActive) {
-      const until = Number(lock.enforcementEndsAt);
-      const waitMs =
-        Number.isFinite(until) && until > Date.now()
-          ? Math.min(until - Date.now(), 45 * 60 * 1000)
-          : 15 * 60 * 1000;
       return {
-        waitMs,
-        reason: "WhatsApp cold-outreach pause is active.",
+        accountRestricted: true,
+        reason: "WhatsApp restricted this account (cold-outreach pause is active).",
       };
     }
   } catch {

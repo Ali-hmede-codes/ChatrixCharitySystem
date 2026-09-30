@@ -3,6 +3,7 @@ import { useApp } from "../../context/AppContext.jsx";
 import { matchesCampaign, matchesRecipient } from "../../services/search.js";
 import { campaignDayKey } from "../../services/excel.js";
 import { personNames } from "../../services/names.js";
+import { canCancelOrDeleteCampaign } from "../../constants/connection.js";
 import {
   IconCheck,
   IconEdit,
@@ -10,6 +11,7 @@ import {
   IconMerge,
   IconSearch,
   IconSend,
+  IconStop,
   IconTrash,
   IconUsers,
   IconX,
@@ -82,6 +84,9 @@ export function CampaignsScreen() {
     campaignsLoading,
     sendJob,
     smsSettings,
+    waState,
+    waMessage,
+    stopSend,
     deleteCampaigns,
     updateCampaign,
     removeCampaignRecipients,
@@ -107,7 +112,15 @@ export function CampaignsScreen() {
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeName, setMergeName] = useState("");
 
-  const liveId = sendJob.running ? sendJob.campaignId : null;
+  function campaignControl(campaign) {
+    return canCancelOrDeleteCampaign({ sendJob, campaign, waState, waMessage });
+  }
+
+  const liveCampaign = campaigns.find((c) => c.id === sendJob.campaignId) || null;
+  const liveLocked = Boolean(
+    sendJob.running && sendJob.campaignId && !campaignControl(liveCampaign || { id: sendJob.campaignId }).delete
+  );
+  const liveId = liveLocked ? sendJob.campaignId : null;
   const smsReady = Boolean(smsSettings.ready);
 
   const todayKey = campaignDayKey(Date.now());
@@ -170,8 +183,12 @@ export function CampaignsScreen() {
   }
 
   function confirmDelete(ids) {
-    const list = ids.filter((id) => id && id !== liveId);
-    const skipped = ids.includes(liveId);
+    const list = ids.filter((id) => {
+      if (!id || id === liveId) return false;
+      const campaign = campaigns.find((c) => c.id === id);
+      return campaignControl(campaign || { id }).delete;
+    });
+    const skipped = ids.some((id) => id && id === liveId);
     if (!list.length) {
       showToast(skipped ? "Stop the live send first, then delete that campaign." : "Choose a campaign to delete.", "warning");
       return;
@@ -409,6 +426,7 @@ export function CampaignsScreen() {
                 hour: "2-digit",
                 minute: "2-digit",
               });
+              const control = campaignControl(c);
               const isLive = liveId === c.id;
               const checked = selectedIds.has(c.id);
               return (
@@ -476,11 +494,27 @@ export function CampaignsScreen() {
                       <IconUsers className="w-3.5 h-3.5 mr-1" />
                       <span>People</span>
                     </button>
+                    {control.cancel && (
+                      <button
+                        type="button"
+                        className="btn-secondary btn-sm"
+                        title="Cancel this paused campaign and keep the remaining people"
+                        onClick={() => {
+                          if (!window.confirm(`Cancel "${c.name}"?\n\nSending stops. People already messaged stay saved. You can resume the rest later, or delete the campaign.`)) {
+                            return;
+                          }
+                          stopSend();
+                        }}
+                      >
+                        <IconStop className="w-3.5 h-3.5 mr-1" />
+                        <span>Cancel</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn-ghost-danger btn-sm"
-                      disabled={isLive}
-                      title={isLive ? "Stop the live send first" : "Delete campaign"}
+                      disabled={!control.delete}
+                      title={control.delete ? "Delete campaign" : "Stop the live send first"}
                       onClick={() => confirmDelete([c.id])}
                     >
                       <IconTrash className="w-3.5 h-3.5" />

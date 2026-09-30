@@ -10,7 +10,7 @@ import {
 } from "../../shared/names.js";
 import { toWhatsAppDigits } from "../../shared/phone.js";
 import { createDeliveryTracker } from "./delivery.js";
-import { looksRateLimited, respectServerLimits } from "./pacing.js";
+import { looksAccountBanned, looksAccountRestricted, looksRateLimited, respectServerLimits } from "./pacing.js";
 import {
   classifyWhatsAppClose,
   isConnectionError,
@@ -51,6 +51,7 @@ export function createSendService(ctx) {
       sent: 0,
       failed: 0,
       skipped: 0,
+      dropOnExit: false,
     };
   }
 
@@ -493,6 +494,10 @@ export function createSendService(ctx) {
           throw new Error("WhatsApp is disconnected");
         }
         const limit = await respectServerLimits(client);
+        if (limit?.accountRestricted) {
+          pause("restricted");
+          continue;
+        }
         if (limit) {
           ctx.io.emit("send:progress", {
             index: globalIndex,
@@ -627,6 +632,11 @@ export function createSendService(ctx) {
           index += 1;
         }
       } catch (error) {
+        if (!sendJob.cancelled && (looksAccountBanned(error) || looksAccountRestricted(error))) {
+          const bannedOffline = looksAccountBanned(error) && !ctx.services.whatsapp?.isOpen?.();
+          pause(bannedOffline ? "banned" : "restricted");
+          continue;
+        }
         if (isConnectionError(error) && !sendJob.cancelled) {
           pauseFromClose({ reason: "client_disconnected", fatal: false });
           // If the send was already attempted (message may be on its way),
@@ -717,14 +727,15 @@ export function createSendService(ctx) {
     }
 
     const stopped = sendJob.cancelled;
-    const remaining = campaign ? ctx.services.campaigns.remainingCount(campaign.id) : 0;
+    const dropped = Boolean(sendJob.dropOnExit);
+    const remaining = !dropped && campaign ? ctx.services.campaigns.remainingCount(campaign.id) : 0;
     const summary = delivery.summarizeBatch(batch);
     sendJob.running = false;
     sendJob.paused = false;
     const pauseReason = sendJob.pauseReason;
     sendJob.cancelled = false;
 
-    if (campaign) {
+    if (campaign && !dropped) {
       await ctx.services.campaigns.finishCampaign(campaign.id, {
         stopped,
         interrupted: !stopped && remaining > 0,
@@ -738,11 +749,12 @@ export function createSendService(ctx) {
       failed: sendJob.failed,
       skipped: sendJob.skipped,
       stopped,
+      dropped,
       remaining,
       total: sendJob.total,
       delivery: summary,
       campaignId: campaign?.id || null,
-      resumable: remaining > 0,
+      resumable: !dropped && remaining > 0,
     });
     sendJob = emptyJob();
     emitStatus();
@@ -926,6 +938,39 @@ export function createSendService(ctx) {
       sampleText: checked.sampleText,
       buildMessages: checked.buildMessages,
     });
+  }
+
+  function qrSessionOffline() {
+    const state = String(ctx.services.whatsapp?.getStatus?.()?.state || "");
+    return state === "qr" || state === "logged-out" || state === "error";
+  }
+
+  // A paused or stopped live job can be removed when the account is banned,
+  // restricted, or the QR session is offline. An active send on an open
+  // account still has to be stopped from the compose screen first.
+  function canReleaseRunningJob() {
+    if (!sendJob.running) return true;
+    const reason = String(sendJob.pauseReason || "");
+    const pausedOrStopped = Boolean(
+      sendJob.paused || sendJob.cancelled || reason === "user_stop"
+    );
+    const qrOffline = qrSessionOffline();
+    if (!pausedOrStopped && !qrOffline) return false;
+    if (reason === "banned" || reason === "restricted") return true;
+    if (qrOffline) return true;
+    return ["removed", "logged_out", "session_replaced"].includes(reason);
+  }
+
+  function releasePausedCampaign(campaignId) {
+    const id = String(campaignId || "");
+    if (!sendJob.running || String(sendJob.campaignId || "") !== id) return { ok: true };
+    if (!canReleaseRunningJob()) {
+      return { ok: false, error: "Stop the live send first, then delete this campaign." };
+    }
+    sendJob.cancelled = true;
+    sendJob.autoResume = false;
+    sendJob.dropOnExit = true;
+    return { ok: true };
   }
 
   function stop() {
@@ -1113,6 +1158,7 @@ export function createSendService(ctx) {
     resume,
     stop,
     pause,
+    releasePausedCampaign,
     onWhatsAppClosed,
     onWhatsAppOpen,
     isRunning: () => sendJob.running,

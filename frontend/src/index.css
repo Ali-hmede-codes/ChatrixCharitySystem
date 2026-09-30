@@ -3528,6 +3528,7 @@ svg {
 .connection-banner {
   display: flex;
   align-items: flex-start;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-subtle);
