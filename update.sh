@@ -87,17 +87,25 @@ if ! instance_pm2 -v >/dev/null 2>&1; then
   npm install -g pm2
 fi
 
-instance_free_port "${APP_PORT}"
-instance_free_port "${LOCK_PORT:-}"
-sleep 1
-
-if grep -q 'readDeployEnv' ecosystem.config.cjs && [ -f .deploy.env ]; then
-  instance_pm2 startOrReload ecosystem.config.cjs --update-env
-elif instance_pm2 describe "${APP_NAME}" >/dev/null 2>&1; then
-  instance_pm2 restart "${APP_NAME}" --update-env
-else
-  echo "PM2 app ${APP_NAME} is not running. Run: sudo bash deploy.sh" >&2
+if ! grep -q 'readDeployEnv' ecosystem.config.cjs || [ ! -f .deploy.env ]; then
+  echo "This folder is not ready to restart. Run: sudo bash deploy.sh" >&2
   exit 1
+fi
+
+# Delete only this app name, then start it again. Do not fuser the port first:
+# killing the live pid and then reloading makes PM2 report
+# "Process with pid already exists" and leaves this app stuck.
+# Other PM2 apps (chatrix, markaba-backend, markaba-frontend, ...) stay up.
+echo "==> Restarting ${APP_NAME} only"
+instance_pm2 delete "${APP_NAME}" >/dev/null 2>&1 || true
+sleep 1
+if ! instance_pm2 start ecosystem.config.cjs --update-env; then
+  echo "==> ${APP_NAME} did not start. Freeing only ports ${APP_PORT}/${LOCK_PORT:-?} and trying once more."
+  instance_pm2 delete "${APP_NAME}" >/dev/null 2>&1 || true
+  instance_free_port "${APP_PORT}"
+  instance_free_port "${LOCK_PORT:-}"
+  sleep 1
+  instance_pm2 start ecosystem.config.cjs --update-env
 fi
 instance_pm2 save
 instance_pm2 list
