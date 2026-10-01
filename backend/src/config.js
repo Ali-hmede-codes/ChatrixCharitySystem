@@ -24,6 +24,7 @@ export const config = {
   LOGO_META_PATH: path.join(AUTH_DIR, "brand-logo.json"),
   BAILEYS_DIR: path.join(BACKEND_DIR, "auth_session"),
   HOST: process.env.HOST || "127.0.0.1",
+  APP_NAME: process.env.APP_NAME || process.env.name || "chatrix",
   PORT: Number(process.env.PORT) || 4173,
   LOCK_PORT: Number(process.env.LOCK_PORT) || 4179,
   SESSION_ID: "default",

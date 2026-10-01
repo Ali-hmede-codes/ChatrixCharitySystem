@@ -1,10 +1,22 @@
 #!/usr/bin/env bash
-# Pull, rebuild, run as root PM2 from /var/www/ChatrixCharitySystem
-#   cd /var/www/ChatrixCharitySystem && sudo bash update.sh
+# Rebuild THIS folder and restart only its PM2 process.
+#   cd /var/www/YourSystem && sudo bash update.sh
 
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/var/www/ChatrixCharitySystem}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=instance.sh
+. "${SCRIPT_DIR}/instance.sh"
+
+APP_DIR="$SCRIPT_DIR"
+SITE_USER="${SITE_USER:-}"
+SITE_HOME="${SITE_HOME:-}"
+
+load_rc=0
+instance_load_saved "$APP_DIR" || load_rc=$?
+if [ "$load_rc" -eq 2 ]; then
+  exit 1
+fi
 
 if [ -s /root/.nvm/nvm.sh ]; then
   # shellcheck disable=SC1091
@@ -12,6 +24,19 @@ if [ -s /root/.nvm/nvm.sh ]; then
 elif [ -s "${HOME}/.nvm/nvm.sh" ]; then
   # shellcheck disable=SC1091
   . "${HOME}/.nvm/nvm.sh"
+fi
+
+if [ "$load_rc" -ne 0 ] || [ -z "${APP_NAME:-}" ] || [ -z "${APP_PORT:-}" ]; then
+  row="$(instance_pm2_row_for "$APP_DIR" || true)"
+  if [ -n "$row" ]; then
+    IFS=$'\t' read -r APP_NAME APP_PORT LOCK_PORT <<< "$row"
+  fi
+fi
+
+if [ -z "${APP_NAME:-}" ] || [ -z "${APP_PORT:-}" ]; then
+  echo "This folder has no saved name or port." >&2
+  echo "Run: sudo bash deploy.sh" >&2
+  exit 1
 fi
 
 [ -f "${APP_DIR}/backend/package.json" ] || {
@@ -24,10 +49,17 @@ git config --global --add safe.directory "${APP_DIR}" >/dev/null 2>&1 || true
 
 if [ -d .git ]; then
   echo "==> Pulling"
+  instance_keep_multisite "$APP_DIR"
+  instance_checkout_kept "$APP_DIR"
+  set +e
   git pull --ff-only
+  pull_rc=$?
+  set -e
+  instance_restore_multisite "$APP_DIR"
+  [ "$pull_rc" -eq 0 ] || exit "$pull_rc"
 fi
 
-echo "==> Build"
+echo "==> Build (${APP_NAME} port ${APP_PORT})"
 # A dropped registry connection can leave exceljs half-extracted (ENOENT /
 # ENOTEMPTY). Wipe that folder and retry setup a few times.
 export npm_config_fetch_retries="${npm_config_fetch_retries:-5}"
@@ -51,15 +83,23 @@ if [ "${setup_ok}" -ne 1 ]; then
   exit 1
 fi
 
-command -v pm2 >/dev/null 2>&1 || npm install -g pm2
+if ! instance_pm2 -v >/dev/null 2>&1; then
+  npm install -g pm2
+fi
 
-fuser -k 4173/tcp 4174/tcp 4179/tcp >/dev/null 2>&1 || true
+instance_free_port "${APP_PORT}"
+instance_free_port "${LOCK_PORT:-}"
 sleep 1
 
-if pm2 describe chatrix >/dev/null 2>&1; then
-  pm2 restart chatrix --update-env
+if grep -q 'readDeployEnv' ecosystem.config.cjs && [ -f .deploy.env ]; then
+  instance_pm2 startOrReload ecosystem.config.cjs --update-env
+elif instance_pm2 describe "${APP_NAME}" >/dev/null 2>&1; then
+  instance_pm2 restart "${APP_NAME}" --update-env
 else
-  pm2 start ecosystem.config.cjs
+  echo "PM2 app ${APP_NAME} is not running. Run: sudo bash deploy.sh" >&2
+  exit 1
 fi
-pm2 save
-pm2 list
+instance_pm2 save
+instance_pm2 list
+echo
+echo "Nginx for ${APP_NAME} stays on port ${APP_PORT}"

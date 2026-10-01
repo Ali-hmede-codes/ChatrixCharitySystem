@@ -11,10 +11,10 @@ acquireLock({
   host: "127.0.0.1",
   port: config.LOCK_PORT,
   onTaken() {
-    console.error("Chatrix Charity System is already running in another process.");
-    console.error("That leftover copy keeps the website up after `pm2 stop`.");
-    console.error("Stop every copy, then start only PM2:");
-    console.error("  sudo pm2 stop chatrix");
+    console.error(`${config.APP_NAME} is already running in another process.`);
+    console.error("That leftover copy keeps this site up after `pm2 stop`.");
+    console.error("Stop that copy, then start only its PM2 process:");
+    console.error(`  sudo pm2 stop ${config.APP_NAME}`);
     console.error(`  sudo fuser -k ${config.PORT}/tcp ${config.LOCK_PORT}/tcp`);
     console.error("  sudo pm2 start ecosystem.config.cjs");
     process.exit(78);

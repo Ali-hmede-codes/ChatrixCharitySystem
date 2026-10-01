@@ -7,9 +7,9 @@ export function listen(ctx) {
 
   const onError = (error) => {
     if (error.code === "EADDRINUSE") {
-      console.error(`Port ${port} is already in use. Another Chatrix copy is still running.`);
-      console.error("Stop every copy, then start only PM2:");
-      console.error("  sudo pm2 stop chatrix");
+      console.error(`Port ${port} is already in use. Another copy of ${config.APP_NAME} is still running.`);
+      console.error("Stop that copy, then start only its PM2 process:");
+      console.error(`  sudo pm2 stop ${config.APP_NAME}`);
       console.error(`  sudo fuser -k ${port}/tcp ${config.LOCK_PORT}/tcp`);
       console.error("  sudo pm2 start ecosystem.config.cjs");
       process.exit(ALREADY_RUNNING);
