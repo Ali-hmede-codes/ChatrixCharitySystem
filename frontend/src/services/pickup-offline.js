@@ -234,6 +234,7 @@ export function exportOffline(snapshot, payload = {}) {
 
 export function markOffline(snapshot, inventory, args, branding = {}) {
   const { campaignId, phone, personName, signature } = args;
+  const requireSignature = args?.requireSignature !== false;
   const cleanedSignature = sanitizeSignature(signature);
   const campaign = (snapshot?.campaigns || []).find((c) => c.id === campaignId);
   if (!campaign) {
@@ -295,7 +296,7 @@ export function markOffline(snapshot, inventory, args, branding = {}) {
     return { snapshot: nextSnapshot, event, op };
   }
 
-  if (!cleanedSignature) {
+  if (requireSignature && !cleanedSignature) {
     return {
       snapshot,
       event: { ok: false, error: "Ask the person to sign before printing." },
@@ -363,6 +364,7 @@ export function markOffline(snapshot, inventory, args, branding = {}) {
     takenAt,
     takenAidId: aidId,
     signature: cleanedSignature,
+    requireSignature,
   };
 
   return { snapshot: nextSnapshot, event, op };
@@ -370,6 +372,7 @@ export function markOffline(snapshot, inventory, args, branding = {}) {
 
 export function reprintOffline(snapshot, inventory, args, branding = {}) {
   const { campaignId, phone, personName, signature } = args;
+  const requireSignature = args?.requireSignature !== false;
   const cleanedSignature = sanitizeSignature(signature);
   const campaign = (snapshot?.campaigns || []).find((c) => c.id === campaignId);
   if (!campaign) {
@@ -390,7 +393,7 @@ export function reprintOffline(snapshot, inventory, args, branding = {}) {
       op: null,
     };
   }
-  if (!sanitizeSignature(pickup.signature) && !cleanedSignature) {
+  if (requireSignature && !sanitizeSignature(pickup.signature) && !cleanedSignature) {
     return {
       snapshot,
       event: { ok: false, error: "Ask the person to sign before printing." },
@@ -434,6 +437,7 @@ export function reprintOffline(snapshot, inventory, args, branding = {}) {
     personName: updatedPickup.name,
     printCount: Number(updatedPickup.printCount) || 1,
     signature: sanitizeSignature(updatedPickup.signature) || cleanedSignature || "",
+    requireSignature,
   };
 
   return { snapshot: nextSnapshot, event, op };

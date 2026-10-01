@@ -1117,8 +1117,10 @@ export function AppProvider({ children }) {
     }
   }
 
-  function markPickup(campaignId, phone, personName, signature) {
+  function markPickup(campaignId, phone, personName, signature, options = {}) {
     if (!campaignId || !phone || pickupBusyRef.current) return;
+    const requireSignature = options.requireSignature !== false;
+    const payload = { campaignId, phone, personName, signature, requireSignature };
     if (!socketRef.current?.connected) {
       const snap = offlineSnapshotRef.current;
       if (!snap) {
@@ -1130,7 +1132,7 @@ export function AppProvider({ children }) {
       const { snapshot, event, op } = markOffline(
         snap,
         inventoryRef.current,
-        { campaignId, phone, personName, signature },
+        payload,
         brandingForReceipt()
       );
       commitOfflineSnapshot(snapshot);
@@ -1143,11 +1145,13 @@ export function AppProvider({ children }) {
     if (!socketRef.current) return;
     pickupBusyRef.current = true;
     setPickupBusy(true);
-    socketRef.current.emit("pickup:mark", { campaignId, phone, personName, signature });
+    socketRef.current.emit("pickup:mark", payload);
   }
 
-  function reprintPickup(campaignId, phone, personName, signature) {
+  function reprintPickup(campaignId, phone, personName, signature, options = {}) {
     if (!campaignId || !phone || pickupBusyRef.current) return;
+    const requireSignature = options.requireSignature !== false;
+    const payload = { campaignId, phone, personName, signature, requireSignature };
     if (!socketRef.current?.connected) {
       const snap = offlineSnapshotRef.current;
       if (!snap) {
@@ -1159,7 +1163,7 @@ export function AppProvider({ children }) {
       const { snapshot, event, op } = reprintOffline(
         snap,
         inventoryRef.current,
-        { campaignId, phone, personName, signature },
+        payload,
         brandingForReceipt()
       );
       commitOfflineSnapshot(snapshot);
@@ -1172,7 +1176,7 @@ export function AppProvider({ children }) {
     if (!socketRef.current) return;
     pickupBusyRef.current = true;
     setPickupBusy(true);
-    socketRef.current.emit("pickup:reprint", { campaignId, phone, personName, signature });
+    socketRef.current.emit("pickup:reprint", payload);
   }
 
   function undoPickup(campaignId, phone, personName) {

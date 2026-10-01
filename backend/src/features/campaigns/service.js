@@ -1164,7 +1164,7 @@ export function createCampaignService(ctx) {
     return Boolean(pickup && pickup.takenAt);
   }
 
-  function markTaken(campaignId, phone, personName, signature) {
+  function markTaken(campaignId, phone, personName, signature, requireSignature = true) {
     const campaign = campaigns.find((c) => c.id === String(campaignId));
     if (!campaign) return { ok: false, error: "Campaign not found." };
     const target = findRecipient(campaign, phone);
@@ -1195,7 +1195,7 @@ export function createCampaignService(ctx) {
       };
     }
 
-    if (!cleanedSignature) {
+    if (requireSignature !== false && !cleanedSignature) {
       return { ok: false, error: "Ask the person to sign before printing." };
     }
 
@@ -1219,7 +1219,7 @@ export function createCampaignService(ctx) {
     };
   }
 
-  function reprintTaken(campaignId, phone, personName, signature) {
+  function reprintTaken(campaignId, phone, personName, signature, requireSignature = true) {
     const campaign = campaigns.find((c) => c.id === String(campaignId));
     if (!campaign) return { ok: false, error: "Campaign not found." };
     const target = findRecipient(campaign, phone);
@@ -1231,10 +1231,10 @@ export function createCampaignService(ctx) {
     }
     const cleanedSignature = sanitizeSignature(signature);
     if (!pickup.signature) {
-      if (!cleanedSignature) {
+      if (requireSignature !== false && !cleanedSignature) {
         return { ok: false, error: "Ask the person to sign before printing." };
       }
-      pickup.signature = cleanedSignature;
+      if (cleanedSignature) pickup.signature = cleanedSignature;
     }
     pickup.printCount = (Number(pickup.printCount) || 1) + 1;
     target.updatedAt = Date.now();
@@ -1375,7 +1375,7 @@ export function createCampaignService(ctx) {
         };
       }
 
-      if (!cleanedSignature) {
+      if (op?.requireSignature !== false && !cleanedSignature) {
         return { ok: false, error: "Ask the person to sign before printing.", conflict: false };
       }
 
@@ -1421,10 +1421,10 @@ export function createCampaignService(ctx) {
       }
       const cleanedSignature = sanitizeSignature(op?.signature);
       if (!pickup.signature) {
-        if (!cleanedSignature) {
+        if (op?.requireSignature !== false && !cleanedSignature) {
           return { ok: false, error: "Ask the person to sign before printing.", conflict: false };
         }
-        pickup.signature = cleanedSignature;
+        if (cleanedSignature) pickup.signature = cleanedSignature;
       }
       // Use max(current, target) so a replayed (lost-ack) reprint op is
       // idempotent and never inflates the count beyond what was printed.

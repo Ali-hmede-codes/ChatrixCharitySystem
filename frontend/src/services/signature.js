@@ -20,6 +20,29 @@ export function pickupIsSigned(item) {
   return Boolean(item?.signed || hasSignature(item?.signature));
 }
 
+const REQUIRE_KEY = "ziko.pickup.requireSignature";
+
+export function readRequireSignature() {
+  try {
+    return localStorage.getItem(REQUIRE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function writeRequireSignature(enabled) {
+  const on = Boolean(enabled);
+  try {
+    localStorage.setItem(REQUIRE_KEY, on ? "1" : "0");
+  } catch {
+    // The desk still uses the in-memory switch for this session.
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("ziko-require-signature", { detail: on }));
+  }
+  return on;
+}
+
 export function signatureImageParts(dataUrl) {
   const cleaned = sanitizeSignature(dataUrl);
   if (!cleaned) return null;

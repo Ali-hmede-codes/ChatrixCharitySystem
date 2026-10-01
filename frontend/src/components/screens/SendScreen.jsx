@@ -39,7 +39,7 @@ import {
   IconTicket,
 } from "../common/Icons.jsx";
 import { SignaturePad } from "../common/SignaturePad.jsx";
-import { pickupIsSigned } from "../../services/signature.js";
+import { pickupIsSigned, readRequireSignature } from "../../services/signature.js";
 
 export function SendScreen() {
   const {
@@ -70,6 +70,18 @@ export function SendScreen() {
 
   const [activeTab, setActiveTab] = useState("compose"); // "compose" | "history"
   const [signTarget, setSignTarget] = useState(null);
+  const [requireSignature, setRequireSignature] = useState(() => readRequireSignature());
+  useEffect(() => {
+    const sync = () => setRequireSignature(readRequireSignature());
+    window.addEventListener("ziko-require-signature", sync);
+    window.addEventListener("storage", sync);
+    window.addEventListener("focus", sync);
+    return () => {
+      window.removeEventListener("ziko-require-signature", sync);
+      window.removeEventListener("storage", sync);
+      window.removeEventListener("focus", sync);
+    };
+  }, []);
 
   // Campaign Compose State
   const defaultCampaignName = useMemo(() => {
@@ -1449,6 +1461,12 @@ export function SendScreen() {
                                 className="btn-secondary btn-xs"
                                 disabled={pickupBusy}
                                 onClick={() => {
+                                  if (!requireSignature) {
+                                    reprintPickup(activeCampaignDetails.id, r.phone, r.personName, "", {
+                                      requireSignature: false,
+                                    });
+                                    return;
+                                  }
                                   if (!pickupIsSigned(r)) {
                                     setSignTarget({
                                       mode: "reprint",
@@ -1461,7 +1479,7 @@ export function SendScreen() {
                                   }
                                   reprintPickup(activeCampaignDetails.id, r.phone, r.personName);
                                 }}
-                                title="Reprint receipt"
+                                title={requireSignature ? "Reprint receipt" : "Reprint receipt without a signature"}
                               >
                                 <IconPrinter className="w-3 h-3 mr-1" />
                                 Reprint
@@ -1471,19 +1489,29 @@ export function SendScreen() {
                                 type="button"
                                 className="btn-primary btn-xs"
                                 disabled={pickupBusy}
-                                onClick={() =>
+                                onClick={() => {
+                                  if (!requireSignature) {
+                                    markPickup(activeCampaignDetails.id, r.phone, r.personName, "", {
+                                      requireSignature: false,
+                                    });
+                                    return;
+                                  }
                                   setSignTarget({
                                     mode: "mark",
                                     campaignId: activeCampaignDetails.id,
                                     phone: r.phone,
                                     personName: r.personName,
                                     name: r.displayName || r.personName,
-                                  })
+                                  });
+                                }}
+                                title={
+                                  requireSignature
+                                    ? "Sign, mark collected, and print receipt"
+                                    : "Mark collected and print without a signature"
                                 }
-                                title="Sign, mark collected, and print receipt"
                               >
                                 <IconTicket className="w-3 h-3 mr-1" />
-                                Accept
+                                {requireSignature ? "Sign & Print" : "Accept"}
                               </button>
                             )}
                           </div>

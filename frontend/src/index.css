@@ -4079,6 +4079,27 @@ svg {
   flex-wrap: wrap;
 }
 
+.pickup-sign-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.pickup-sign-toggle.is-off {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.pickup-sign-toggle .switch-control {
+  margin-top: 0;
+}
+
 .pickup-desk-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.85fr);

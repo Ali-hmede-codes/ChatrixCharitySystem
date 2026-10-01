@@ -112,7 +112,8 @@ export const campaignsFeature = {
           payload?.campaignId,
           payload?.phone,
           payload?.personName,
-          payload?.signature
+          payload?.signature,
+          payload?.requireSignature
         );
         if (!result.ok) {
           if (inv) result.inventory = inv.publicState();
@@ -133,7 +134,8 @@ export const campaignsFeature = {
           payload?.campaignId,
           payload?.phone,
           payload?.personName,
-          payload?.signature
+          payload?.signature,
+          payload?.requireSignature
         );
         const inv = ctx.services.inventory;
         if (inv) result.inventory = inv.publicState();
