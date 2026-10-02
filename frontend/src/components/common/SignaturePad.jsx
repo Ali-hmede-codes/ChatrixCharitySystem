@@ -33,6 +33,10 @@ export function SignaturePad({
   open,
   personName = "",
   busy = false,
+  title = "Sign to collect",
+  description,
+  okLabel = "OK",
+  stack = "",
   onCancel,
   onConfirm,
 }) {
@@ -163,11 +167,13 @@ export function SignaturePad({
 
   if (!open) return null;
 
+  const stackClass = stack === "front" ? " is-front" : "";
+
   return (
     <>
-      <div className="sign-sheet-backdrop is-open" onClick={() => !busy && onCancel?.()} aria-hidden="true" />
+      <div className={`sign-sheet-backdrop is-open${stackClass}`} onClick={() => !busy && onCancel?.()} aria-hidden="true" />
       <aside
-        className="sign-sheet is-open"
+        className={`sign-sheet is-open${stackClass}`}
         role="dialog"
         aria-modal="true"
         aria-label="Signature"
@@ -180,9 +186,11 @@ export function SignaturePad({
           <IconX className="w-5 h-5" />
         </button>
         <div className="sign-sheet-head">
-          <h2>Sign to collect</h2>
+          <h2>{title}</h2>
           <p>
-            {personName ? (
+            {description != null ? (
+              description
+            ) : personName ? (
               <>
                 <strong dir="auto">{personName}</strong> signs here, then tap OK to print the receipt.
               </>
@@ -215,7 +223,7 @@ export function SignaturePad({
           </button>
           <button type="button" className="btn-primary" disabled={busy || !hasInk} onClick={handleOk}>
             <IconCheck className="w-4 h-4 mr-1.5" />
-            <span>OK</span>
+            <span>{okLabel}</span>
           </button>
         </div>
       </aside>

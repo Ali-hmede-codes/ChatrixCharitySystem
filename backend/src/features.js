@@ -18,12 +18,14 @@ import { inventoryFeature } from "./features/inventory/index.js";
 import { messageTemplateFeature } from "./features/message-template/index.js";
 import { printerFeature } from "./features/printer/index.js";
 import { sendFeature } from "./features/send/index.js";
+import { signDevicesFeature } from "./features/sign-devices/index.js";
 import { smsFeature } from "./features/sms/index.js";
 import { whatsappFeature } from "./features/whatsapp/index.js";
 
 export const enabledFeatures = [
   brandFeature,
   campaignsFeature,
+  signDevicesFeature,
   messageTemplateFeature,
   printerFeature,
   smsFeature,

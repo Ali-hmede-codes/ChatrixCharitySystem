@@ -11,6 +11,7 @@ import { PickupScreen } from "./components/screens/PickupScreen.jsx";
 import { CampaignsScreen } from "./components/screens/CampaignsScreen.jsx";
 import { InventoryScreen } from "./components/screens/InventoryScreen.jsx";
 import { SignatureSheetScreen } from "./components/screens/SignatureSheetScreen.jsx";
+import { SignHandoff } from "./components/common/SignHandoff.jsx";
 
 export function App() {
   const { currentStep, toast, navOpen } = useApp();
@@ -24,6 +25,7 @@ export function App() {
             <span>{toast.message}</span>
           </div>
         )}
+        <SignHandoff />
       </div>
     );
   }
@@ -57,6 +59,7 @@ export function App() {
           <span>{toast.message}</span>
         </div>
       )}
+      <SignHandoff />
     </div>
   );
 }

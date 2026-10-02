@@ -22,8 +22,9 @@ import {
 } from "../common/Icons.jsx";
 import { PickupImportModal } from "./PickupImportModal.jsx";
 import { Skeleton } from "../common/Skeleton.jsx";
-import { SignaturePad } from "../common/SignaturePad.jsx";
+import { SignDevicePicker } from "../common/SignDevicePicker.jsx";
 import { pickupIsSigned } from "../../services/signature.js";
+import { describeSignTarget } from "../../services/sign-device.js";
 
 function PickupListSkeleton({ rows = 6 }) {
   return (
@@ -128,6 +129,15 @@ export function PickupScreen() {
     lastSyncAt,
     requireSignature,
     setRequireSignature,
+    localSignDevice,
+    signDevices,
+    signTarget,
+    setSignTarget,
+    renameSignDevice,
+    outgoingSign,
+    incomingSign,
+    localSign,
+    requestCollectionSign,
   } = useApp();
 
   const todayKey = campaignDayKey(Date.now());
@@ -145,9 +155,14 @@ export function PickupScreen() {
   const [exportStatus, setExportStatus] = useState("taken");
   const [exportDay, setExportDay] = useState("all");
   const [exportCampaignId, setExportCampaignId] = useState("");
-  const [signOpen, setSignOpen] = useState(false);
-  const [signMode, setSignMode] = useState("mark");
   const [importOpen, setImportOpen] = useState(false);
+  const signPlace = describeSignTarget({
+    target: signTarget,
+    self: localSignDevice,
+    devices: signDevices,
+    socketConnected,
+  });
+  const signHandoffOpen = Boolean(outgoingSign || incomingSign || localSign);
 
   // On mobile the confirm card is a bottom sheet that should only open when
   // the user taps a name — so we skip the "auto-select first row" behaviour on
@@ -310,16 +325,11 @@ export function PickupScreen() {
     setRequireSignature(!requireSignature);
   }
 
-  useEffect(() => {
-    if (!requireSignature) setSignOpen(false);
-  }, [requireSignature]);
-
   function handleAccept() {
-    if (!selected || pickupBusy) return;
+    if (!selected || pickupBusy || signHandoffOpen) return;
     if (selected.takenAt) {
       if (requireSignature && !pickupIsSigned(selected)) {
-        setSignMode("reprint");
-        setSignOpen(true);
+        requestCollectionSign(selected, "reprint");
         return;
       }
       const ok = window.confirm(
@@ -339,25 +349,13 @@ export function PickupScreen() {
       collectWithoutSignature(selected, "mark");
       return;
     }
-    setSignMode("mark");
-    setSignOpen(true);
-  }
-
-  function handleSignConfirm(signature) {
-    if (!selected || pickupBusy) return;
-    setSignOpen(false);
-    if (signMode === "reprint") {
-      reprintPickup(selected.campaignId, selected.phone, selected.personName || selected.name, signature);
-      return;
-    }
-    markPickup(selected.campaignId, selected.phone, selected.personName || selected.name, signature);
+    requestCollectionSign(selected, "mark");
   }
 
   function handleReprint() {
-    if (!selected || pickupBusy) return;
+    if (!selected || pickupBusy || signHandoffOpen) return;
     if (requireSignature && !pickupIsSigned(selected)) {
-      setSignMode("reprint");
-      setSignOpen(true);
+      requestCollectionSign(selected, "reprint");
       return;
     }
     if (requireSignature) reprintPickup(...personPickupArgs(selected));
@@ -421,9 +419,13 @@ export function PickupScreen() {
         <div>
           <h1 className="page-title">Aid Pickup Desk</h1>
           <p className="page-subtitle">
-            {requireSignature
-              ? "Filter by campaign date, open a person, then sign and print. Collected signatures are saved into the Excel export."
-              : "Signature is off. Open a person, then Accept & Print without a signature."}
+            {!requireSignature
+              ? "Signature is off. Open a person, then Accept & Print without a signature."
+              : signPlace.where === "remote"
+                ? signPlace.online
+                  ? `People sign on ${signPlace.name}. After they tap OK, this device prints the receipt.`
+                  : `Signing is set to ${signPlace.name}, but that device is offline.`
+                : "Filter by campaign date, open a person, then sign and print. Collected signatures are saved into the Excel export."}
           </p>
         </div>
         <div className="header-actions pickup-header-stats">
@@ -508,24 +510,36 @@ export function PickupScreen() {
                 )}
               </div>
 
-              <div className={`pickup-sign-toggle ${requireSignature ? "" : "is-off"}`}>
-                <div className="switch-label-wrap">
-                  <span className="switch-title">{requireSignature ? "Signature on" : "Signature off"}</span>
-                  <span className="switch-hint">
-                    {requireSignature
-                      ? "Opening a person still asks them to sign before print."
-                      : "Opening a person prints without a signature."}
-                  </span>
+              <div className={`pickup-sign-setup ${requireSignature ? "" : "is-off"}`}>
+                <div className="pickup-sign-toggle">
+                  <div className="switch-label-wrap">
+                    <span className="switch-title">{requireSignature ? "Signature on" : "Signature off"}</span>
+                    <span className="switch-hint">
+                      {requireSignature
+                        ? "A signature is required before the receipt prints."
+                        : "Opening a person prints without a signature."}
+                    </span>
+                  </div>
+                  <label className="switch-control" title="Turn signature on or off">
+                    <input
+                      type="checkbox"
+                      checked={requireSignature}
+                      onChange={toggleRequireSignature}
+                      aria-label="Require signature before print"
+                    />
+                    <span className="switch-slider" />
+                  </label>
                 </div>
-                <label className="switch-control" title="Turn signature on or off">
-                  <input
-                    type="checkbox"
-                    checked={requireSignature}
-                    onChange={toggleRequireSignature}
-                    aria-label="Require signature before print"
+                {requireSignature && (
+                  <SignDevicePicker
+                    self={localSignDevice}
+                    devices={signDevices}
+                    target={signTarget}
+                    socketConnected={socketConnected}
+                    onTargetChange={setSignTarget}
+                    onRename={renameSignDevice}
                   />
-                  <span className="switch-slider" />
-                </label>
+                )}
               </div>
 
               <div className="pickup-filter-row">
@@ -764,9 +778,13 @@ export function PickupScreen() {
                       <dd>
                         {pickupIsSigned(selected)
                           ? "Signed"
-                          : requireSignature
-                            ? "Needed before print"
-                            : "Off — not required"}
+                          : !requireSignature
+                            ? "Off — not required"
+                            : signPlace.where === "remote"
+                              ? signPlace.online
+                                ? `Will sign on ${signPlace.name}`
+                                : `${signPlace.name} is offline`
+                              : "Will sign on this device"}
                       </dd>
                     </div>
                     {selected.signature ? (
@@ -806,10 +824,19 @@ export function PickupScreen() {
                       <span>Out of stock. Restock in Inventory before collecting.</span>
                     </div>
                   ) : null}
+                  {requireSignature && !selected.takenAt && (
+                    <p className="pickup-sign-route">
+                      {signPlace.where === "remote"
+                        ? signPlace.online
+                          ? `Signs on ${signPlace.name}. Prints on this device.`
+                          : `${signPlace.name} is offline. You can sign on this device when you collect.`
+                        : "Signs on this device, then prints here."}
+                    </p>
+                  )}
                   <button
                     type="button"
                     className="btn-primary pickup-accept-btn"
-                    disabled={pickupBusy || (!selected.takenAt && invCount <= 0)}
+                    disabled={pickupBusy || signHandoffOpen || (!selected.takenAt && invCount <= 0)}
                     onClick={handleAccept}
                   >
                     <IconTicket className="w-4 h-4 mr-1.5" />
@@ -823,11 +850,11 @@ export function PickupScreen() {
                   </button>
                   {selected.takenAt && (
                     <>
-                      <button type="button" className="btn-secondary" disabled={pickupBusy} onClick={handleReprint}>
+                      <button type="button" className="btn-secondary" disabled={pickupBusy || signHandoffOpen} onClick={handleReprint}>
                         <IconPrinter className="w-4 h-4 mr-1.5" />
                         <span>Reprint receipt</span>
                       </button>
-                      <button type="button" className="btn-text-danger" disabled={pickupBusy} onClick={handleUndo}>
+                      <button type="button" className="btn-text-danger" disabled={pickupBusy || signHandoffOpen} onClick={handleUndo}>
                         Undo collected
                       </button>
                     </>
@@ -838,9 +865,11 @@ export function PickupScreen() {
               <div className="pickup-confirm-empty">
                 <IconTicket className="w-8 h-8 text-slate-400 mb-2" />
                 <p>
-                  {requireSignature
-                    ? "Search a beneficiary, open them, then Sign & Print. Use campaign date to find collected people, then export them to Excel."
-                    : "Search a beneficiary, open them, then Accept & Print. Signature is off, so no sign is needed."}
+                  {!requireSignature
+                    ? "Search a beneficiary, open them, then Accept & Print. Signature is off, so no sign is needed."
+                    : signPlace.where === "remote" && signPlace.online
+                      ? `Search a beneficiary, then Sign & Print. They sign on ${signPlace.name}, and this device prints.`
+                      : "Search a beneficiary, open them, then Sign & Print. Use campaign date to find collected people, then export them to Excel."}
                 </p>
               </div>
             )}
@@ -1029,13 +1058,6 @@ export function PickupScreen() {
         />
       )}
 
-      <SignaturePad
-        open={signOpen}
-        personName={selected?.name || ""}
-        busy={pickupBusy}
-        onCancel={() => setSignOpen(false)}
-        onConfirm={handleSignConfirm}
-      />
     </div>
   );
 }

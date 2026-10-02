@@ -4117,21 +4117,33 @@ svg {
   flex-wrap: wrap;
 }
 
-.pickup-sign-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+.pickup-sign-setup {
   margin-top: 10px;
-  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #f8fafc;
 }
 
-.pickup-sign-toggle.is-off {
+.pickup-sign-setup.is-off {
   background: #fff7ed;
   border-color: #fed7aa;
+}
+
+.pickup-sign-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.pickup-sign-toggle.is-off {
+  background: transparent;
+  border-color: transparent;
 }
 
 .pickup-sign-toggle .switch-control {
@@ -4915,6 +4927,180 @@ html.sign-lock-select * {
 .sign-sheet-actions .btn-primary,
 .sign-sheet-actions .btn-secondary {
   min-width: 108px;
+}
+
+.sign-sheet.is-front,
+.sign-sheet-backdrop.is-front {
+  z-index: 120;
+}
+
+.sign-sheet-backdrop.is-front {
+  z-index: 110;
+}
+
+.sign-sheet.sign-handoff {
+  touch-action: auto;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.sign-handoff-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.sign-handoff-status.is-waiting {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.sign-handoff-status.is-busy,
+.sign-handoff-status.is-timeout,
+.sign-handoff-status.is-declined,
+.sign-handoff-status.is-error,
+.sign-handoff-status.is-offline,
+.sign-handoff-status.is-disconnected {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.sign-handoff-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.sign-handoff-dot.is-live {
+  animation: sign-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes sign-pulse {
+  0%,
+  100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.sign-handoff-facts {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 0;
+}
+
+.sign-handoff-facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sign-handoff-facts dt {
+  color: var(--slate-500);
+  font-size: 12px;
+}
+
+.sign-handoff-facts dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.sign-handoff-actions {
+  flex-wrap: wrap;
+}
+
+.sign-device-picker {
+  padding: 0 10px 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sign-device-picker-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.sign-device-picker-head .switch-title,
+.sign-device-picker-head .switch-hint {
+  display: block;
+}
+
+.sign-device-rename {
+  flex: 0 0 160px;
+}
+
+.sign-device-rename .form-input {
+  height: 32px;
+}
+
+.sign-device-rename-btn {
+  flex-shrink: 0;
+  min-height: 32px;
+}
+
+.sign-device-picker .form-select {
+  margin-top: 8px;
+}
+
+.sign-device-status,
+.sign-device-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--slate-600);
+}
+
+.sign-device-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--slate-400);
+  flex-shrink: 0;
+}
+
+.sign-device-status.is-online {
+  color: #047857;
+}
+
+.sign-device-status.is-online .sign-device-dot {
+  background: #10b981;
+}
+
+.sign-device-status.is-offline {
+  color: #9a3412;
+}
+
+.sign-device-status.is-offline .sign-device-dot {
+  background: #f59e0b;
+}
+
+.sign-device-empty {
+  display: block;
+  color: var(--slate-500);
+}
+
+.pickup-sign-route {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--slate-600);
 }
 
 @media (max-width: 1024px) {

@@ -25,8 +25,29 @@ import {
   applyInventoryToSnapshot,
 } from "../services/pickup-offline.js";
 import { readRequireSignature, writeRequireSignature } from "../services/signature.js";
+import {
+  createSignRequestId,
+  readLocalSignDevice,
+  readSignTarget,
+  writeLocalSignDeviceName,
+  writeSignTarget,
+} from "../services/sign-device.js";
 
 const AppContext = createContext(null);
+
+function personFromPickup(item) {
+  const phone = String(item?.phone || "").trim();
+  const name = String(item?.name || item?.personName || "").trim() || phone;
+  const personName = String(item?.personName || item?.name || "").trim() || name;
+  return {
+    campaignId: String(item?.campaignId || ""),
+    phone,
+    personName,
+    name,
+    campaignName: String(item?.campaignName || ""),
+    code: String(item?.code || ""),
+  };
+}
 
 export function AppProvider({ children }) {
   const socketRef = useRef(null);
@@ -94,6 +115,25 @@ export function AppProvider({ children }) {
   // collecting at 0, and warns when under 20.
   const [inventory, setInventory] = useState({ count: 0, label: "Aid portions", updatedAt: null });
   const [requireSignature, setRequireSignatureState] = useState(() => readRequireSignature());
+  const [localSignDevice, setLocalSignDevice] = useState(readLocalSignDevice);
+  const [signDevices, setSignDevices] = useState([]);
+  const [signTarget, setSignTargetState] = useState(readSignTarget);
+  const [outgoingSign, setOutgoingSign] = useState(null);
+  const [incomingSign, setIncomingSign] = useState(null);
+  const [incomingSignBusy, setIncomingSignBusy] = useState(false);
+  const [localSign, setLocalSign] = useState(null);
+  const localDeviceRef = useRef(localSignDevice);
+  const signDevicesRef = useRef(signDevices);
+  const signTargetRef = useRef(signTarget);
+  const outgoingSignRef = useRef(outgoingSign);
+  const incomingSignRef = useRef(incomingSign);
+  const incomingBusyRef = useRef(false);
+  const localSignRef = useRef(localSign);
+  const pickupActionsRef = useRef({
+    markPickup: () => {},
+    reprintPickup: () => {},
+    openLocalSign: () => {},
+  });
   const inventoryRef = useRef(inventory);
   const [lastPickupImport, setLastPickupImport] = useState(null);
   const [pickupResults, setPickupResults] = useState({
@@ -249,6 +289,14 @@ export function AppProvider({ children }) {
       socket.emit("inventory:get");
       socket.emit("pickup:hydrate");
       socket.emit("pickup:signature-mode:get");
+      const device = localDeviceRef.current;
+      if (device?.deviceId) {
+        socket.emit("sign-device:hello", {
+          deviceId: device.deviceId,
+          name: device.name,
+          kind: device.kind,
+        });
+      }
       if (hadConnectionRef.current) {
         showToast("Reconnected to Chatrix. Campaigns and send status refreshed.", "success");
       }
@@ -260,7 +308,27 @@ export function AppProvider({ children }) {
       pickupBusyRef.current = false;
       setPickupBusy(false);
       setPickupLoading(false);
-      showToast("Lost connection to Chatrix. Your campaigns stay saved. Reconnecting…", "warning");
+      signDevicesRef.current = [];
+      setSignDevices([]);
+      incomingBusyRef.current = false;
+      setIncomingSignBusy(false);
+      let signNote = "";
+      if (incomingSignRef.current) {
+        incomingSignRef.current = null;
+        setIncomingSign(null);
+        signNote = " The signature request was cancelled.";
+      }
+      const outgoing = outgoingSignRef.current;
+      if (outgoing && outgoing.status === "waiting") {
+        const next = {
+          ...outgoing,
+          status: "disconnected",
+          message: "This computer lost connection. The signature request was cancelled. Reconnect, then try again or sign here.",
+        };
+        outgoingSignRef.current = next;
+        setOutgoingSign(next);
+      }
+      showToast(`Lost connection to Chatrix. Your campaigns stay saved. Reconnecting…${signNote}`, "warning");
     });
 
     socket.on("wa:status", (event) => {
@@ -709,6 +777,127 @@ export function AppProvider({ children }) {
     });
     socket.on("printer:saved", (msg) => showToast(msg, "success"));
     socket.on("printer:error", (msg) => showToast(msg, "error"));
+
+    socket.on("sign-device:list", (data) => {
+      const devices = Array.isArray(data?.devices) ? data.devices : [];
+      signDevicesRef.current = devices;
+      setSignDevices(devices);
+      const currentTarget = signTargetRef.current;
+      if (!currentTarget || currentTarget.id === "self") return;
+      const live = devices.find((device) => device.deviceId === currentTarget.id && !device.self);
+      if (!live || !live.name || live.name === currentTarget.name) return;
+      const next = writeSignTarget({ id: live.deviceId, name: live.name, kind: live.kind });
+      signTargetRef.current = next;
+      setSignTargetState(next);
+    });
+
+    socket.on("sign-device:replaced", (event) => {
+      showToast(event?.message || "Signing for this browser moved to the newest open tab.", "warning");
+    });
+
+    socket.on("pickup:sign-incoming", (event) => {
+      if (!event?.requestId || !event?.person) return;
+      incomingSignRef.current = event;
+      setIncomingSign(event);
+      incomingBusyRef.current = false;
+      setIncomingSignBusy(false);
+      if (localSignRef.current) {
+        localSignRef.current = null;
+        setLocalSign(null);
+      }
+    });
+
+    socket.on("pickup:sign-waiting", (event) => {
+      const current = outgoingSignRef.current;
+      if (!current || current.requestId !== event?.requestId || current.status !== "waiting") return;
+      const next = { ...current, targetName: event.targetName || current.targetName };
+      outgoingSignRef.current = next;
+      setOutgoingSign(next);
+    });
+
+    socket.on("pickup:sign-ready", (event) => {
+      const current = outgoingSignRef.current;
+      if (!current || current.requestId !== event?.requestId || !event?.signature) return;
+      outgoingSignRef.current = null;
+      setOutgoingSign(null);
+      const person = current.person || event.person || {};
+      const name = person.personName || person.name || "";
+      const mode = current.mode || event.mode;
+      const actions = pickupActionsRef.current;
+      if (mode === "reprint") actions.reprintPickup?.(person.campaignId, person.phone, name, event.signature);
+      else actions.markPickup?.(person.campaignId, person.phone, name, event.signature);
+    });
+
+    socket.on("pickup:sign-finished", (event) => {
+      if (incomingSignRef.current && (!event?.requestId || incomingSignRef.current.requestId === event.requestId)) {
+        incomingSignRef.current = null;
+        setIncomingSign(null);
+        incomingBusyRef.current = false;
+        setIncomingSignBusy(false);
+        const who = event?.name ? `${event.name} signed.` : "Signature sent.";
+        showToast(`${who} The other device will print the receipt.`, "success");
+      }
+    });
+
+    socket.on("pickup:sign-cancelled", (event) => {
+      const requestId = event?.requestId;
+      if (incomingSignRef.current?.requestId === requestId) {
+        incomingSignRef.current = null;
+        setIncomingSign(null);
+        incomingBusyRef.current = false;
+        setIncomingSignBusy(false);
+        showToast(event?.message || "The signature request was cancelled.", "warning");
+        return;
+      }
+      const current = outgoingSignRef.current;
+      if (!current || current.requestId !== requestId) return;
+      if (event?.reason === "cancelled") {
+        outgoingSignRef.current = null;
+        setOutgoingSign(null);
+        return;
+      }
+      const status =
+        event?.reason === "timeout"
+          ? "timeout"
+          : event?.reason === "declined"
+            ? "declined"
+            : event?.reason === "busy"
+              ? "busy"
+              : "disconnected";
+      const next = { ...current, status, message: event?.message || current.message };
+      outgoingSignRef.current = next;
+      setOutgoingSign(next);
+    });
+
+    socket.on("pickup:sign-error", (event) => {
+      incomingBusyRef.current = false;
+      setIncomingSignBusy(false);
+      const current = outgoingSignRef.current;
+      if (current && event?.requestId && current.requestId === event.requestId) {
+        if (event.code === "self") {
+          const person = current.person;
+          const mode = current.mode;
+          outgoingSignRef.current = null;
+          setOutgoingSign(null);
+          pickupActionsRef.current.openLocalSign?.(person, mode);
+          return;
+        }
+        const status = event.code === "busy" ? "busy" : event.code === "offline" ? "offline" : "error";
+        const next = { ...current, status, message: event.error || "Could not send the signature." };
+        outgoingSignRef.current = next;
+        setOutgoingSign(next);
+        return;
+      }
+      if (incomingSignRef.current?.requestId === event?.requestId) {
+        if (event?.code === "invalid" && /no longer active/i.test(event?.error || "")) {
+          incomingSignRef.current = null;
+          setIncomingSign(null);
+        }
+        showToast(event?.error || "Could not send the signature.", "error");
+        return;
+      }
+      if (event?.error) showToast(event.error, "error");
+    });
 
     return () => {
       socket.disconnect();
@@ -1310,12 +1499,178 @@ export function AppProvider({ children }) {
     if (socketRef.current) socketRef.current.emit("logo:clear");
   }
 
+  function openLocalSign(person, mode) {
+    const session = { person, mode: mode === "reprint" ? "reprint" : "mark" };
+    localSignRef.current = session;
+    setLocalSign(session);
+  }
+
+  function openOutgoing(session) {
+    outgoingSignRef.current = session;
+    setOutgoingSign(session);
+  }
+
+  function requestCollectionSign(item, mode) {
+    if (!item?.campaignId || !item?.phone || pickupBusyRef.current) return;
+    if (localSignRef.current || outgoingSignRef.current) return;
+    const person = personFromPickup(item);
+    const signMode = mode === "reprint" ? "reprint" : "mark";
+    const target = signTargetRef.current;
+    const self = localDeviceRef.current;
+    const remoteId = target?.id && target.id !== "self" && target.id !== self?.deviceId ? target.id : "";
+    if (!remoteId) {
+      openLocalSign(person, signMode);
+      return;
+    }
+    const remembered = {
+      deviceId: remoteId,
+      name: target.name || "Other device",
+      kind: target.kind || "phone",
+    };
+    if (!socketRef.current?.connected) {
+      openOutgoing({
+        requestId: "",
+        status: "offline",
+        targetDeviceId: remembered.deviceId,
+        targetName: remembered.name,
+        person,
+        mode: signMode,
+        message: `This computer is offline, so ${remembered.name} cannot open the signature. Sign on this device, or wait until both are connected.`,
+      });
+      return;
+    }
+    const live = signDevicesRef.current.find((device) => device.deviceId === remoteId && !device.self);
+    if (!live) {
+      openOutgoing({
+        requestId: "",
+        status: "disconnected",
+        targetDeviceId: remembered.deviceId,
+        targetName: remembered.name,
+        person,
+        mode: signMode,
+        message: `${remembered.name} is not connected. Open this site on that device and keep it open, or sign here.`,
+      });
+      return;
+    }
+    const requestId = createSignRequestId();
+    openOutgoing({
+      requestId,
+      status: "waiting",
+      targetDeviceId: live.deviceId,
+      targetName: live.name,
+      person,
+      mode: signMode,
+      message: "",
+    });
+    socketRef.current.emit("pickup:sign-request", {
+      requestId,
+      targetDeviceId: live.deviceId,
+      mode: signMode,
+      campaignId: person.campaignId,
+      phone: person.phone,
+      personName: person.personName,
+      name: person.name,
+      campaignName: person.campaignName,
+      code: person.code,
+    });
+  }
+
+  function cancelOutgoingSign() {
+    const session = outgoingSignRef.current;
+    if (session?.status === "waiting" && session.requestId && socketRef.current?.connected) {
+      socketRef.current.emit("pickup:sign-cancel", { requestId: session.requestId });
+    }
+    outgoingSignRef.current = null;
+    setOutgoingSign(null);
+  }
+
+  function retryOutgoingSign() {
+    const session = outgoingSignRef.current;
+    if (!session?.person || session.status === "waiting") return;
+    outgoingSignRef.current = null;
+    setOutgoingSign(null);
+    requestCollectionSign(session.person, session.mode || "mark");
+  }
+
+  function signOutgoingHere() {
+    const session = outgoingSignRef.current;
+    if (!session?.person) return;
+    if (session.status === "waiting" && session.requestId && socketRef.current?.connected) {
+      socketRef.current.emit("pickup:sign-cancel", { requestId: session.requestId });
+    }
+    outgoingSignRef.current = null;
+    setOutgoingSign(null);
+    openLocalSign(session.person, session.mode || "mark");
+  }
+
+  function confirmLocalSign(signature) {
+    const session = localSignRef.current;
+    if (!session?.person) return;
+    localSignRef.current = null;
+    setLocalSign(null);
+    const person = session.person;
+    const name = person.personName || person.name;
+    if (session.mode === "reprint") reprintPickup(person.campaignId, person.phone, name, signature);
+    else markPickup(person.campaignId, person.phone, name, signature);
+  }
+
+  function cancelLocalSign() {
+    if (pickupBusyRef.current) return;
+    localSignRef.current = null;
+    setLocalSign(null);
+  }
+
+  function submitIncomingSign(signature) {
+    const incoming = incomingSignRef.current;
+    if (!incoming?.requestId || incomingBusyRef.current) return;
+    if (!socketRef.current?.connected) {
+      incomingSignRef.current = null;
+      setIncomingSign(null);
+      showToast("Disconnected. The signature was not sent.", "warning");
+      return;
+    }
+    incomingBusyRef.current = true;
+    setIncomingSignBusy(true);
+    socketRef.current.emit("pickup:sign-submit", { requestId: incoming.requestId, signature });
+  }
+
+  function cancelIncomingSign() {
+    if (incomingBusyRef.current) return;
+    const incoming = incomingSignRef.current;
+    if (incoming?.requestId && socketRef.current?.connected) {
+      socketRef.current.emit("pickup:sign-cancel", { requestId: incoming.requestId });
+    }
+    incomingSignRef.current = null;
+    setIncomingSign(null);
+    incomingBusyRef.current = false;
+    setIncomingSignBusy(false);
+  }
+
+  function setSignTarget(next) {
+    const saved = writeSignTarget(next);
+    signTargetRef.current = saved;
+    setSignTargetState(saved);
+  }
+
+  function renameSignDevice(name) {
+    const saved = writeLocalSignDeviceName(name);
+    if (!saved) return;
+    const next = { ...localDeviceRef.current, name: saved };
+    localDeviceRef.current = next;
+    setLocalSignDevice(next);
+    socketRef.current?.emit("sign-device:rename", { name: saved });
+  }
+
   function setRequireSignature(enabled) {
     const on = Boolean(enabled);
     writeRequireSignature(on);
     setRequireSignatureState(on);
     socketRef.current?.emit("pickup:signature-mode:set", { requireSignature: on });
   }
+
+  pickupActionsRef.current.markPickup = markPickup;
+  pickupActionsRef.current.reprintPickup = reprintPickup;
+  pickupActionsRef.current.openLocalSign = openLocalSign;
 
   const value = {
     socketConnected,
@@ -1359,6 +1714,23 @@ export function AppProvider({ children }) {
     pickupLoading,
     requireSignature,
     setRequireSignature,
+    localSignDevice,
+    signDevices,
+    signTarget,
+    setSignTarget,
+    renameSignDevice,
+    outgoingSign,
+    incomingSign,
+    incomingSignBusy,
+    localSign,
+    requestCollectionSign,
+    cancelOutgoingSign,
+    retryOutgoingSign,
+    signOutgoingHere,
+    submitIncomingSign,
+    cancelIncomingSign,
+    confirmLocalSign,
+    cancelLocalSign,
     pickupResults,
     searchPickup,
     importPickupList,
