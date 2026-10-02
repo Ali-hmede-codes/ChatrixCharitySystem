@@ -23,6 +23,7 @@ import {
   applyRecipientEventToSnapshot,
   applyInventoryToSnapshot,
 } from "../services/pickup-offline.js";
+import { readRequireSignature, writeRequireSignature } from "../services/signature.js";
 
 const AppContext = createContext(null);
 
@@ -91,6 +92,7 @@ export function AppProvider({ children }) {
   // Aid inventory at the pickup desk. Decrements -1 on each collection, blocks
   // collecting at 0, and warns when under 20.
   const [inventory, setInventory] = useState({ count: 0, label: "Aid portions", updatedAt: null });
+  const [requireSignature, setRequireSignatureState] = useState(() => readRequireSignature());
   const inventoryRef = useRef(inventory);
   const [lastPickupImport, setLastPickupImport] = useState(null);
   const [pickupResults, setPickupResults] = useState({
@@ -244,6 +246,7 @@ export function AppProvider({ children }) {
       socket.emit("printer:get");
       socket.emit("inventory:get");
       socket.emit("pickup:hydrate");
+      socket.emit("pickup:signature-mode:get");
       if (hadConnectionRef.current) {
         showToast("Reconnected to Chatrix. Campaigns and send status refreshed.", "success");
       }
@@ -679,6 +682,15 @@ export function AppProvider({ children }) {
       setInventory(inv);
       setOfflineSnapshot((current) => (current ? applyInventoryToSnapshot(current, inv) : current));
       showToast(`Inventory updated · ${data.count} ${data.label || "aid"} in stock.`, "success");
+    });
+
+    socket.on("pickup:signature-mode", (data) => {
+      const on = data?.requireSignature !== false;
+      writeRequireSignature(on);
+      setRequireSignatureState(on);
+    });
+    socket.on("pickup:signature-mode:error", (msg) => {
+      showToast(msg || "Could not update the signature switch.", "error");
     });
 
     socket.on("printer:settings", (data) => {
@@ -1245,6 +1257,13 @@ export function AppProvider({ children }) {
     if (socketRef.current) socketRef.current.emit("logo:clear");
   }
 
+  function setRequireSignature(enabled) {
+    const on = Boolean(enabled);
+    writeRequireSignature(on);
+    setRequireSignatureState(on);
+    socketRef.current?.emit("pickup:signature-mode:set", { requireSignature: on });
+  }
+
   const value = {
     socketConnected,
     isOnline,
@@ -1285,6 +1304,8 @@ export function AppProvider({ children }) {
     mergeCampaigns,
     pickupBusy,
     pickupLoading,
+    requireSignature,
+    setRequireSignature,
     pickupResults,
     searchPickup,
     importPickupList,

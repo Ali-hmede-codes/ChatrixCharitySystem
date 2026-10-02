@@ -39,7 +39,7 @@ import {
   IconTicket,
 } from "../common/Icons.jsx";
 import { SignaturePad } from "../common/SignaturePad.jsx";
-import { pickupIsSigned, readRequireSignature } from "../../services/signature.js";
+import { pickupIsSigned } from "../../services/signature.js";
 
 export function SendScreen() {
   const {
@@ -66,22 +66,14 @@ export function SendScreen() {
     markPickup,
     reprintPickup,
     setSettingsActiveTab,
+    requireSignature,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState("compose"); // "compose" | "history"
   const [signTarget, setSignTarget] = useState(null);
-  const [requireSignature, setRequireSignature] = useState(() => readRequireSignature());
   useEffect(() => {
-    const sync = () => setRequireSignature(readRequireSignature());
-    window.addEventListener("ziko-require-signature", sync);
-    window.addEventListener("storage", sync);
-    window.addEventListener("focus", sync);
-    return () => {
-      window.removeEventListener("ziko-require-signature", sync);
-      window.removeEventListener("storage", sync);
-      window.removeEventListener("focus", sync);
-    };
-  }, []);
+    if (!requireSignature) setSignTarget(null);
+  }, [requireSignature]);
 
   // Campaign Compose State
   const defaultCampaignName = useMemo(() => {

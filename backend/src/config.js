@@ -18,6 +18,7 @@ export const config = {
   SMS_SETTINGS_PATH: path.join(AUTH_DIR, "sms-settings.json"),
   MESSAGE_SETTINGS_PATH: path.join(AUTH_DIR, "message-settings.json"),
   PRINTER_SETTINGS_PATH: path.join(AUTH_DIR, "printer-settings.json"),
+  PICKUP_SETTINGS_PATH: path.join(AUTH_DIR, "pickup-settings.json"),
   AID_SEQ_PATH: path.join(AUTH_DIR, "aid-seq.json"),
   INVENTORY_PATH: path.join(AUTH_DIR, "inventory.json"),
   LOGO_PATH: path.join(AUTH_DIR, "brand-logo"),

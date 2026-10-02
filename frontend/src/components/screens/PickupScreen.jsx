@@ -23,7 +23,7 @@ import {
 import { PickupImportModal } from "./PickupImportModal.jsx";
 import { Skeleton } from "../common/Skeleton.jsx";
 import { SignaturePad } from "../common/SignaturePad.jsx";
-import { pickupIsSigned, readRequireSignature, writeRequireSignature } from "../../services/signature.js";
+import { pickupIsSigned } from "../../services/signature.js";
 
 function PickupListSkeleton({ rows = 6 }) {
   return (
@@ -126,6 +126,8 @@ export function PickupScreen() {
     pendingCount,
     syncing,
     lastSyncAt,
+    requireSignature,
+    setRequireSignature,
   } = useApp();
 
   const todayKey = campaignDayKey(Date.now());
@@ -145,7 +147,6 @@ export function PickupScreen() {
   const [exportCampaignId, setExportCampaignId] = useState("");
   const [signOpen, setSignOpen] = useState(false);
   const [signMode, setSignMode] = useState("mark");
-  const [requireSignature, setRequireSignature] = useState(() => readRequireSignature());
   const [importOpen, setImportOpen] = useState(false);
 
   // On mobile the confirm card is a bottom sheet that should only open when
@@ -306,10 +307,12 @@ export function PickupScreen() {
   }
 
   function toggleRequireSignature() {
-    const next = !requireSignature;
-    writeRequireSignature(next);
-    setRequireSignature(next);
+    setRequireSignature(!requireSignature);
   }
+
+  useEffect(() => {
+    if (!requireSignature) setSignOpen(false);
+  }, [requireSignature]);
 
   function handleAccept() {
     if (!selected || pickupBusy) return;

@@ -1,14 +1,77 @@
+import { createJsonStore } from "../../infrastructure/json-file.js";
 import { createCampaignService } from "./service.js";
+
+function createSignatureMode(ctx) {
+  const store = createJsonStore(ctx.config.PICKUP_SETTINGS_PATH, { requireSignature: true });
+  let requireSignature = true;
+
+  function load() {
+    const raw = store.read();
+    requireSignature = raw?.requireSignature !== false;
+  }
+
+  function payload() {
+    return { requireSignature };
+  }
+
+  function emit(socket) {
+    const data = payload();
+    if (socket) socket.emit("pickup:signature-mode", data);
+    else ctx.io.emit("pickup:signature-mode", data);
+  }
+
+  let queue = Promise.resolve();
+
+  function set(enabled) {
+    const run = queue.then(async () => {
+      const next = enabled !== false;
+      const previous = requireSignature;
+      requireSignature = next;
+      try {
+        await store.write({ requireSignature: next });
+      } catch (err) {
+        requireSignature = previous;
+        ctx.logger?.error?.({ err }, "signature mode save failed");
+        return { ok: false, ...payload() };
+      }
+      emit();
+      return { ok: true, ...payload() };
+    });
+    queue = run.then(
+      () => {},
+      () => {}
+    );
+    return run;
+  }
+
+  load();
+  return { payload, emit, set };
+}
 
 export const campaignsFeature = {
   name: "campaigns",
   init(ctx) {
     ctx.services.campaigns = createCampaignService(ctx);
+    ctx.services.signatureMode = createSignatureMode(ctx);
   },
   sockets(ctx) {
     ctx.onSocket((socket) => {
       const campaigns = ctx.services.campaigns;
+      const signatureMode = ctx.services.signatureMode;
       campaigns.emit(socket);
+      signatureMode.emit(socket);
+
+      socket.on("pickup:signature-mode:get", () => {
+        signatureMode.emit(socket);
+      });
+
+      socket.on("pickup:signature-mode:set", async (payload) => {
+        const result = await signatureMode.set(payload?.requireSignature);
+        if (!result.ok) {
+          socket.emit("pickup:signature-mode", { requireSignature: result.requireSignature });
+          socket.emit("pickup:signature-mode:error", "Could not update the signature switch for everyone.");
+        }
+      });
 
       socket.on("campaigns:list", () => {
         campaigns.emit(socket);
