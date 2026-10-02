@@ -145,6 +145,14 @@ export const campaignsFeature = {
         }
       });
 
+      socket.on("pickup:signatures", (payload) => {
+        const codes = Array.isArray(payload?.codes) ? payload.codes : [];
+        socket.emit("pickup:signatures:result", {
+          requestId: payload?.requestId || "",
+          ...campaigns.signaturesForCodes(codes),
+        });
+      });
+
       socket.on("pickup:export", (payload) => {
         const p = payload || {};
         const wantStatus =

@@ -2413,6 +2413,44 @@ svg {
   margin-bottom: 10px;
 }
 
+.sign-sheet-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.sign-sheet-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.sign-sheet-columns label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--slate-600);
+}
+
+.sign-sheet-table {
+  margin-top: 16px;
+  max-height: min(560px, 62vh);
+}
+
+.sign-sheet-thumb {
+  display: block;
+  height: 36px;
+  width: 120px;
+  object-fit: contain;
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+}
+
 .preview-table-wrap {
   flex: 1;
   width: 100%;

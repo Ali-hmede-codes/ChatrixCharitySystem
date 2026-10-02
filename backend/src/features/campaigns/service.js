@@ -1481,6 +1481,58 @@ export function createCampaignService(ctx) {
     return { ok: false, error: `Unknown offline op: ${type}`, conflict: false };
   }
 
+  function codeKey(value) {
+    return String(value || "")
+      .replace(/\s+/g, "")
+      .trim()
+      .toLowerCase()
+      .slice(0, 80);
+  }
+
+  // Look up saved pickup signatures for the codes on an uploaded Excel sheet.
+  // A code with no signature is still returned so the desk can say "found, not signed".
+  function signaturesForCodes(codes) {
+    const wanted = new Set();
+    for (const code of (Array.isArray(codes) ? codes : []).slice(0, 5000)) {
+      const key = codeKey(code);
+      if (key) wanted.add(key);
+    }
+    const found = new Map();
+    if (!wanted.size) return { ok: true, items: [] };
+
+    for (const campaign of campaigns) {
+      for (const recipient of campaign.recipients || []) {
+        const pickups =
+          Array.isArray(recipient.pickups) && recipient.pickups.length
+            ? recipient.pickups
+            : ensurePickups(recipient);
+        for (const pickup of pickups) {
+          const rawCode = nameCodeFor(recipient, pickup.name);
+          const key = codeKey(rawCode);
+          if (!key || !wanted.has(key)) continue;
+          const signature = sanitizeSignature(pickup.signature);
+          const prev = found.get(key);
+          const takenAt = Number(pickup.takenAt) || 0;
+          const better =
+            !prev ||
+            (signature && !prev.signature) ||
+            (Boolean(signature) === Boolean(prev.signature) && takenAt >= (Number(prev.takenAt) || 0));
+          if (!better) continue;
+          found.set(key, {
+            code: rawCode,
+            name: pickup.name || "",
+            phone: recipient.phone || "",
+            signature,
+            signed: Boolean(signature),
+            takenAt: pickup.takenAt || null,
+          });
+        }
+      }
+    }
+
+    return { ok: true, items: [...found.values()] };
+  }
+
   return {
     list,
     listResumable,
@@ -1504,6 +1556,7 @@ export function createCampaignService(ctx) {
     merge: mergeCampaigns,
     emit,
     searchPickup,
+    signaturesForCodes,
     markTaken,
     reprintTaken,
     undoTaken,

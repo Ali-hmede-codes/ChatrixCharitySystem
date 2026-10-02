@@ -7,6 +7,7 @@ import {
   IconShield,
   IconTicket,
   IconHistory,
+  IconEdit,
 } from "../common/Icons.jsx";
 
 export function MobileTopBar() {
@@ -92,6 +93,13 @@ export function MobileBottomNav() {
       icon: <IconTicket className="w-5 h-5" />,
       active: currentStep === "pickup",
       onClick: () => setCurrentStep("pickup"),
+    },
+    {
+      id: "signature-sheet",
+      label: "Sign",
+      icon: <IconEdit className="w-5 h-5" />,
+      active: currentStep === "signature-sheet",
+      onClick: () => setCurrentStep("signature-sheet"),
     },
     {
       id: "auth",

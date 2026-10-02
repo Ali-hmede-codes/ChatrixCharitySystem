@@ -27,6 +27,10 @@ export function headerLooksLikeNationality(header) {
   return /nationality|جنسية|national/i.test(String(header || ""));
 }
 
+export function headerLooksLikeSignature(header) {
+  return /signature|توقيع|امض|إمضاء|sign\b/i.test(String(header || ""));
+}
+
 export function headerLooksLikeCode(header) {
   const text = String(header || "");
   if (headerLooksLikePhone(text)) return false;
@@ -107,6 +111,25 @@ export function guessNameCol(headers, phoneIndex) {
     }
   });
   return bestScore > 0 ? best : -1;
+}
+
+export function guessSignatureCol(headers, skip = []) {
+  const blocked = new Set(skip);
+  let best = -1;
+  let bestScore = 0;
+  headers.forEach((header, index) => {
+    if (blocked.has(index)) return;
+    const text = String(header || "");
+    let score = 0;
+    if (/توقيع|امض|إمضاء/.test(text)) score += 12;
+    if (/signature/i.test(text)) score += 12;
+    else if (/\bsign\b/i.test(text)) score += 6;
+    if (score > bestScore) {
+      bestScore = score;
+      best = index;
+    }
+  });
+  return bestScore >= 6 ? best : -1;
 }
 
 export function guessCodeCol(headers, phoneIndex, nameIndex) {

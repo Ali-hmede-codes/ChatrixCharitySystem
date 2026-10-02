@@ -12,7 +12,7 @@
 // in place. Returns the new snapshot plus a result event shaped like the
 // backend's `pickup:done` / `pickup:results` so the UI handler is shared.
 
-import { namesEqual, nameCodeFor } from "./names.js";
+import { namesEqual, nameCodeFor, codeKey } from "./names.js";
 import { matchesText, normalizeSearch } from "./search.js";
 import { campaignDayKey, allocateOfflineAidId } from "./aid-id.js";
 import { sanitizeSignature } from "./signature.js";
@@ -211,6 +211,41 @@ export function searchPickupOffline(snapshot, payload = {}) {
     total: items.length,
     items: items.slice(0, maxItems).map(({ score, ...item }) => item),
   };
+}
+
+export function signaturesForCodesOffline(snapshot, codes) {
+  const wanted = new Set();
+  for (const code of (Array.isArray(codes) ? codes : []).slice(0, 5000)) {
+    const key = codeKey(code);
+    if (key) wanted.add(key);
+  }
+  const found = new Map();
+  for (const campaign of snapshot?.campaigns || []) {
+    for (const recipient of campaign.recipients || []) {
+      for (const pickup of recipient.pickups || []) {
+        const rawCode = nameCodeFor(recipient, pickup.name);
+        const key = codeKey(rawCode);
+        if (!key || !wanted.has(key)) continue;
+        const signature = sanitizeSignature(pickup.signature);
+        const prev = found.get(key);
+        const takenAt = Number(pickup.takenAt) || 0;
+        const better =
+          !prev ||
+          (signature && !prev.signature) ||
+          (Boolean(signature) === Boolean(prev.signature) && takenAt >= (Number(prev.takenAt) || 0));
+        if (!better) continue;
+        found.set(key, {
+          code: rawCode,
+          name: pickup.name || "",
+          phone: recipient.phone || "",
+          signature,
+          signed: Boolean(signature),
+          takenAt: pickup.takenAt || null,
+        });
+      }
+    }
+  }
+  return [...found.values()];
 }
 
 export function exportOffline(snapshot, payload = {}) {

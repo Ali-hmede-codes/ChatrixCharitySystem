@@ -10,6 +10,7 @@ import {
   IconX,
   IconTicket,
   IconHistory,
+  IconEdit,
 } from "../common/Icons.jsx";
 
 export function Sidebar() {
@@ -155,6 +156,16 @@ export function Sidebar() {
               {todayWaiting > 0 ? (
                 <span className="sidebar-nav-badge">{todayWaiting}</span>
               ) : null}
+            </button>
+            <button
+              type="button"
+              className={`sidebar-nav-item ${currentStep === "signature-sheet" ? "active" : ""}`}
+              onClick={() => setCurrentStep("signature-sheet")}
+            >
+              <span className="sidebar-nav-icon">
+                <IconEdit className="w-4 h-4" />
+              </span>
+              <span className="sidebar-nav-label">Signature sheet</span>
             </button>
           </nav>
         </div>

@@ -16,6 +16,7 @@ import {
 } from "../services/offline-db.js";
 import {
   searchPickupOffline,
+  signaturesForCodesOffline,
   exportOffline,
   markOffline,
   reprintOffline,
@@ -113,6 +114,7 @@ export function AppProvider({ children }) {
   const [syncing, setSyncing] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState(null);
   const offlineSnapshotRef = useRef(null);
+  const signatureLookupRef = useRef(null);
   const brandRef = useRef(brand);
   const syncingRef = useRef(false);
 
@@ -646,6 +648,14 @@ export function AppProvider({ children }) {
 
     socket.on("pickup:export-data", (data) => handleExportData(data));
 
+    socket.on("pickup:signatures:result", (data) => {
+      const pending = signatureLookupRef.current;
+      if (!pending || !data || data.requestId !== pending.requestId) return;
+      signatureLookupRef.current = null;
+      window.clearTimeout(pending.timer);
+      pending.resolve(data);
+    });
+
     socket.on("pickup:done", (event) => applyPickupDone(event));
 
     socket.on("pickup:snapshot", (data) => {
@@ -1080,6 +1090,49 @@ export function AppProvider({ children }) {
     socketRef.current.emit("pickup:search", payload);
   }
 
+  function lookupSignatures(codes) {
+    const list = [];
+    const seen = new Set();
+    for (const code of Array.isArray(codes) ? codes : []) {
+      const text = String(code || "").trim();
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      list.push(text);
+      if (list.length >= 5000) break;
+    }
+    if (!list.length) return Promise.resolve({ ok: true, items: [] });
+
+    if (!socketRef.current?.connected) {
+      const snap = offlineSnapshotRef.current;
+      if (!snap) {
+        return Promise.resolve({
+          ok: false,
+          error: "Connect to Chatrix once so saved signatures can be loaded.",
+          items: [],
+        });
+      }
+      return Promise.resolve({ ok: true, items: signaturesForCodesOffline(snap, list) });
+    }
+
+    return new Promise((resolve) => {
+      if (signatureLookupRef.current) {
+        const previous = signatureLookupRef.current;
+        signatureLookupRef.current = null;
+        window.clearTimeout(previous.timer);
+        previous.resolve({ ok: false, error: "Signature lookup was replaced.", items: [] });
+      }
+      const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const timer = window.setTimeout(() => {
+        const pending = signatureLookupRef.current;
+        if (!pending || pending.requestId !== requestId) return;
+        signatureLookupRef.current = null;
+        pending.resolve({ ok: false, error: "Signature lookup timed out. Try again.", items: [] });
+      }, 45000);
+      signatureLookupRef.current = { resolve, timer, requestId };
+      socketRef.current.emit("pickup:signatures", { requestId, codes: list });
+    });
+  }
+
   function exportCollected(payload = {}) {
     if (!socketRef.current?.connected) {
       const snap = offlineSnapshotRef.current;
@@ -1311,6 +1364,7 @@ export function AppProvider({ children }) {
     importPickupList,
     lastPickupImport,
     exportCollected,
+    lookupSignatures,
     markPickup,
     reprintPickup,
     undoPickup,

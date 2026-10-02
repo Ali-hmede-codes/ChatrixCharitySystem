@@ -7,6 +7,11 @@ export function sanitizeAidCode(value) {
     .slice(0, 80);
 }
 
+// Match pickup codes from Excel even when spacing or letter case differs.
+export function codeKey(value) {
+  return sanitizeAidCode(value).replace(/\s+/g, "").toLowerCase();
+}
+
 export function messageHasCodePlaceholder(text) {
   return /\[(?:Aid)?Code\]|\[كود\]/i.test(String(text || ""));
 }
