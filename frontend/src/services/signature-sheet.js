@@ -9,6 +9,7 @@ import {
 } from "./excel.js";
 import { codeKey, sanitizeAidCode } from "./names.js";
 import { signatureImageParts } from "./signature.js";
+import { stampSignaturesOnXlsx } from "./xlsx-preserve.js";
 
 function cloneBytes(buffer) {
   const bytes = new Uint8Array(buffer);
@@ -179,23 +180,20 @@ export function indexSignatureMatches(items) {
   return map;
 }
 
+function base64ToBytes(b64) {
+  const clean = String(b64 || "").replace(/\s+/g, "");
+  const bin = atob(clean);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 export async function buildSignedWorkbookBuffer(workbookFile, { sheetName, rows, codeCol, signatureCol, matches }) {
   if (codeCol < 0) throw new Error("Choose the pickup code column first.");
   if (signatureCol < 0) throw new Error("Choose the signature column first.");
 
-  const ExcelJSModule = await import("exceljs");
-  const ExcelJS = ExcelJSModule.default || ExcelJSModule;
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(cloneBytes(workbookFile.buffer));
-  const sheet = workbook.getWorksheet(sheetName);
-  if (!sheet) throw new Error("That sheet is no longer in this file.");
-
-  const column = sheet.getColumn(signatureCol + 1);
-  if ((Number(column.width) || 0) < 18) column.width = 22;
-
-  let stamped = 0;
+  const images = [];
   let missing = 0;
-
   for (const row of rows || []) {
     const key = codeKey(row.cells?.[codeCol]);
     if (!key) continue;
@@ -204,24 +202,21 @@ export async function buildSignedWorkbookBuffer(workbookFile, { sheetName, rows,
       missing += 1;
       continue;
     }
-    const excelRow = sheet.getRow(row.excelRow);
-    if ((Number(excelRow.height) || 0) < 36) excelRow.height = 42;
-    excelRow.getCell(signatureCol + 1).value = null;
-    const imageId = workbook.addImage({
-      base64: image.base64,
+    images.push({
+      row: row.excelRow - 1,
+      col: signatureCol,
+      bytes: base64ToBytes(image.base64),
       extension: image.extension,
     });
-    sheet.addImage(imageId, {
-      tl: { col: signatureCol + 0.06, row: row.excelRow - 1 + 0.12 },
-      ext: { width: 128, height: 40 },
-      editAs: "oneCell",
-    });
-    stamped += 1;
   }
 
-  const fileName = signedFileName(workbookFile.fileName);
-  const out = await workbook.xlsx.writeBuffer();
-  return { fileName, stamped, missing, buffer: out };
+  const out = await stampSignaturesOnXlsx(workbookFile.buffer, { sheetName, images });
+  return {
+    fileName: signedFileName(workbookFile.fileName),
+    stamped: images.length,
+    missing,
+    buffer: out,
+  };
 }
 
 export async function downloadSignedWorkbook(workbookFile, options) {
